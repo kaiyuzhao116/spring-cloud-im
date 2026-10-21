@@ -4,6 +4,12 @@ server:
 spring:
   application:
     name: api-gateway
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      database: 0
+      timeout: 3000ms
   cloud:
     nacos:
       server-addr: 127.0.0.1:8848
@@ -15,11 +21,9 @@ spring:
         locator:
           enabled: true
           lower-case-service-id: true
-      # 统一剥离外部传入的身份头，防止客户端伪造（真实值由 JWT 过滤器后续注入）
-      default-filters:
-        - RemoveRequestHeader=X-User-Id
-        - RemoveRequestHeader=X-User-Name
-        - RemoveRequestHeader=X-User-Roles
+      # 注意：不要在这里用 RemoveRequestHeader 剥身份头。
+      # default-filters 在全局过滤器之后执行，会把 AuthGlobalFilter 刚注入的可信头删掉，
+      # 导致下游一直报"缺少身份信息"。剥离动作已在 AuthGlobalFilter 内部完成。
       routes:
         - id: auth
           uri: lb://auth
@@ -39,6 +43,17 @@ spring:
             - Path=/api/account/**
           filters:
             - StripPrefix=2
+
+# 网关鉴权配置：secret 必须与 auth 服务一致（生产环境改 RS256 公钥）
+gateway:
+  auth:
+    secret: spring-cloud-im-demo-jwt-secret-key-please-change-in-prod
+    white-list:
+      - /api/auth/login
+      - /api/auth/register
+      - /api/auth/refresh
+      - /api/auth/sms/code
+      - /actuator/health
 
 management:
   endpoints:

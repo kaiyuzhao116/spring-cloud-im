@@ -36,6 +36,9 @@
         <spring-cloud-alibaba.version>2022.0.0.0</spring-cloud-alibaba.version>
         <!-- Dubbo 3.2.x 才完整支持 Spring Boot 3 / JDK 17 -->
         <dubbo.version>3.2.10</dubbo.version>
+        <jjwt.version>0.12.5</jjwt.version>
+        <!-- Spring Boot 3.0.2 默认 Lombok 1.18.24，不支持 JDK 21 编译，这里显式升级 -->
+        <lombok.version>1.18.30</lombok.version>
     </properties>
 
     <dependencyManagement>
@@ -82,6 +85,30 @@
                 <groupId>org.apache.dubbo</groupId>
                 <artifactId>dubbo-metadata-report-nacos</artifactId>
                 <version>${dubbo.version}</version>
+            </dependency>
+
+            <!-- 显式覆盖 BOM 里的 Lombok 版本（BOM 内的属性无法被本项目属性覆盖） -->
+            <dependency>
+                <groupId>org.projectlombok</groupId>
+                <artifactId>lombok</artifactId>
+                <version>${lombok.version}</version>
+            </dependency>
+
+            <!-- JWT -->
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-api</artifactId>
+                <version>${jjwt.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-impl</artifactId>
+                <version>${jjwt.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-jackson</artifactId>
+                <version>${jjwt.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

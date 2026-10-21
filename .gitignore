@@ -31,3 +31,14 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Frontend ###
+node_modules/
+dist/
+npm-debug.log*
+.idea
+*.iml
+
+### Local ###
+*.log
+logs/

@@ -4,6 +4,17 @@ server:
 spring:
   application:
     name: auth
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      database: 0
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 1
   cloud:
     nacos:
       server-addr: 127.0.0.1:8848
@@ -15,14 +26,27 @@ spring:
         group: DEFAULT_GROUP
         file-extension: yaml
         refresh-enabled: true
+  # 从 Nacos 配置中心加载 auth.yaml；optional: 表示 Nacos 不可用时仍能启动
   config:
     import:
       - optional:nacos:auth.yaml
+
+# 认证配置：生产环境请把 secret 移到配置中心/KMS，并改用 RS256
+jwt:
+  secret: spring-cloud-im-demo-jwt-secret-key-please-change-in-prod
+  expire-seconds: 1800
+  session-ttl-seconds: 604800
+  max-fail-count: 5
+  fail-window-seconds: 900
 
 dubbo:
   application:
     name: auth
     qos-enable: false
+    # 与 user 同理：避免应用级注册与 Spring Cloud 服务名撞车
+    register-mode: interface
+    service-discovery:
+      migration: FORCE_INTERFACE
   registry:
     address: nacos://127.0.0.1:8848
   protocol:

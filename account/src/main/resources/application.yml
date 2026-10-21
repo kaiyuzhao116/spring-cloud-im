@@ -23,6 +23,7 @@ dubbo:
   application:
     name: account
     qos-enable: false
+    register-mode: interface
   registry:
     address: nacos://127.0.0.1:8848
   protocol:
