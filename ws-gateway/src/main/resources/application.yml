@@ -1,0 +1,36 @@
+spring:
+  application:
+    name: ws-gateway
+
+# Netty 接入层参数（后续由 NettyServer 读取）
+netty:
+  port: 8089
+  boss-threads: 1
+  worker-threads: 0
+  heartbeat-idle-seconds: 60
+  max-frame-length: 65536
+
+dubbo:
+  application:
+    name: ws-gateway
+    qos-enable: false
+  registry:
+    address: nacos://127.0.0.1:8848
+  protocol:
+    name: dubbo
+    port: 20885
+  consumer:
+    check: false
+    timeout: 3000
+    retries: 0
+
+---
+# 没有启动 Nacos 时的本地模式：--spring.profiles.active=local
+spring:
+  config:
+    activate:
+      on-profile: local
+
+dubbo:
+  registry:
+    address: N/A

@@ -11,9 +11,17 @@
     <description>spring_cloud parent</description>
 
     <modules>
-        <module>provider</module>
-        <module>consumer</module>
-        <module>gateway</module>
+        <!-- 公共模块 -->
+        <module>spring-cloud-common</module>
+        <module>spring-cloud-api</module>
+        <!-- 网关层 -->
+        <module>api-gateway</module>
+        <module>ws-gateway</module>
+        <!-- 业务服务 -->
+        <module>auth</module>
+        <module>user</module>
+        <module>im</module>
+        <module>account</module>
     </modules>
 
     <properties>
@@ -26,11 +34,12 @@
         <spring-boot.version>3.0.2</spring-boot.version>
         <spring-cloud.version>2022.0.0</spring-cloud.version>
         <spring-cloud-alibaba.version>2022.0.0.0</spring-cloud-alibaba.version>
+        <!-- Dubbo 3.2.x 才完整支持 Spring Boot 3 / JDK 17 -->
+        <dubbo.version>3.2.10</dubbo.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
-            <!-- Spring Boot BOM -->
             <dependency>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>
@@ -38,7 +47,6 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <!-- Spring Cloud BOM -->
             <dependency>
                 <groupId>org.springframework.cloud</groupId>
                 <artifactId>spring-cloud-dependencies</artifactId>
@@ -46,13 +54,34 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <!-- Spring Cloud Alibaba BOM（Nacos / Sentinel） -->
             <dependency>
                 <groupId>com.alibaba.cloud</groupId>
                 <artifactId>spring-cloud-alibaba-dependencies</artifactId>
                 <version>${spring-cloud-alibaba.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+
+            <!-- Dubbo 相关，统一版本 -->
+            <dependency>
+                <groupId>org.apache.dubbo</groupId>
+                <artifactId>dubbo</artifactId>
+                <version>${dubbo.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.dubbo</groupId>
+                <artifactId>dubbo-spring-boot-starter</artifactId>
+                <version>${dubbo.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.dubbo</groupId>
+                <artifactId>dubbo-registry-nacos</artifactId>
+                <version>${dubbo.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.dubbo</groupId>
+                <artifactId>dubbo-metadata-report-nacos</artifactId>
+                <version>${dubbo.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

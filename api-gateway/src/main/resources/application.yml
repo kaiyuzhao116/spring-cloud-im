@@ -1,0 +1,50 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    nacos:
+      server-addr: 127.0.0.1:8848
+      discovery:
+        namespace: public
+        group: DEFAULT_GROUP
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+      # 统一剥离外部传入的身份头，防止客户端伪造（真实值由 JWT 过滤器后续注入）
+      default-filters:
+        - RemoveRequestHeader=X-User-Id
+        - RemoveRequestHeader=X-User-Name
+        - RemoveRequestHeader=X-User-Roles
+      routes:
+        - id: auth
+          uri: lb://auth
+          predicates:
+            - Path=/api/auth/**
+          filters:
+            - StripPrefix=2
+        - id: user
+          uri: lb://user
+          predicates:
+            - Path=/api/user/**
+          filters:
+            - StripPrefix=2
+        - id: account
+          uri: lb://account
+          predicates:
+            - Path=/api/account/**
+          filters:
+            - StripPrefix=2
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: '*'
+  endpoint:
+    health:
+      show-details: always

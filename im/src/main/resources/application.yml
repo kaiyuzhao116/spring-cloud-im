@@ -1,0 +1,50 @@
+spring:
+  application:
+    name: im
+  cloud:
+    nacos:
+      server-addr: 127.0.0.1:8848
+      discovery:
+        namespace: public
+        group: DEFAULT_GROUP
+      config:
+        namespace: public
+        group: DEFAULT_GROUP
+        file-extension: yaml
+        refresh-enabled: true
+  config:
+    import:
+      - optional:nacos:im.yaml
+
+# 纯 Dubbo Provider，不占用 HTTP 端口
+dubbo:
+  application:
+    name: im
+    qos-enable: false
+  registry:
+    address: nacos://127.0.0.1:8848
+  protocol:
+    name: dubbo
+    port: 20883
+  scan:
+    base-packages: com.song.im
+  consumer:
+    check: false
+    timeout: 3000
+
+---
+# 没有启动 Nacos 时的本地模式：--spring.profiles.active=local
+spring:
+  config:
+    activate:
+      on-profile: local
+  cloud:
+    nacos:
+      discovery:
+        enabled: false
+      config:
+        enabled: false
+
+dubbo:
+  registry:
+    address: N/A
