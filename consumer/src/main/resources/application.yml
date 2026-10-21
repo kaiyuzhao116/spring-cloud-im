@@ -1,0 +1,58 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: consumer
+  cloud:
+    nacos:
+      server-addr: 127.0.0.1:8848
+      # Nacos 未开启鉴权时不要配 username/password，否则客户端反复请求 /auth/login 报 500
+      # 若在 conf/application.properties 里打开 nacos.core.auth.enabled=true，再放开下面两行
+      # username: nacos
+      # password: nacos
+      discovery:
+        namespace: public
+        group: DEFAULT_GROUP
+      config:
+        namespace: public
+        group: DEFAULT_GROUP
+        file-extension: yaml
+        refresh-enabled: true
+  # 从 Nacos 配置中心加载 consumer.yaml；optional: 前缀表示 Nacos 不可用时仍能启动
+  config:
+    import:
+      - optional:nacos:consumer.yaml
+
+# OpenFeign + Sentinel 熔断降级开关
+feign:
+  sentinel:
+    enabled: true
+  client:
+    config:
+      default:
+        connect-timeout: 5000
+        read-timeout: 5000
+        logger-level: basic
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: '*'
+  endpoint:
+    health:
+      show-details: always
+
+---
+# 没有启动 Nacos 时的本地单机模式：--spring.profiles.active=local
+spring:
+  config:
+    activate:
+      on-profile: local
+  cloud:
+    nacos:
+      discovery:
+        enabled: false
+      config:
+        enabled: false
