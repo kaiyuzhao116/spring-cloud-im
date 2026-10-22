@@ -5,12 +5,16 @@ import com.song.common.ResultCode;
 import com.song.im.domain.ConversationId;
 import com.song.im.domain.SendRequest;
 import com.song.im.domain.SendResult;
+import com.song.im.mq.MessageEvent;
+import com.song.im.mq.MessageEventPublisher;
 import com.song.im.repository.MessageRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -33,9 +37,13 @@ public class MessageService {
 
     private final SeqGenerator seqGenerator;
 
-    public MessageService(MessageRepository messageRepository, SeqGenerator seqGenerator) {
+    private final MessageEventPublisher eventPublisher;
+
+    public MessageService(MessageRepository messageRepository, SeqGenerator seqGenerator,
+                          MessageEventPublisher eventPublisher) {
         this.messageRepository = messageRepository;
         this.seqGenerator = seqGenerator;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -73,7 +81,25 @@ public class MessageService {
 
         log.info("消息落库成功 msgId={} conversation={} seq={} from={} to={}",
                 msgId, conversationId, seq, fromUid, request.getTo());
+
+        // 事件必须在事务提交后再发，否则消费端可能查不到这条消息
+        publishAfterCommit(new MessageEvent(msgId, conversationId, seq, fromUid,
+                request.getTo(), request.getContent(), System.currentTimeMillis()));
+
         return new SendResult(msgId, seq, conversationId);
+    }
+
+    private void publishAfterCommit(MessageEvent event) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    eventPublisher.publish(event);
+                }
+            });
+        } else {
+            eventPublisher.publish(event);
+        }
     }
 
     private void validate(SendRequest request) {

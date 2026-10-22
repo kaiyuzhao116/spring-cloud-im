@@ -1,6 +1,11 @@
 spring:
   application:
     name: ws-gateway
+  rabbitmq:
+    host: 127.0.0.1
+    port: 5672
+    username: guest
+    password: guest
 
 # Netty 接入层参数（后续由 NettyServer 读取）
 netty:

@@ -46,6 +46,12 @@
             <artifactId>jackson-databind</artifactId>
         </dependency>
 
+        <!-- 消费 im 的消息事件（推送） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-amqp</artifactId>
+        </dependency>
+
         <!-- JWT 验签（版本由父 pom 管理） -->
         <dependency>
             <groupId>io.jsonwebtoken</groupId>
