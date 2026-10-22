@@ -34,7 +34,7 @@ spring:
         - id: user
           uri: lb://user
           predicates:
-            - Path=/api/user/**WS 打通：BusinessHandler + Dubbo 调 im
+            - Path=/api/user/**
           filters:
             - StripPrefix=2
         - id: im

@@ -35,7 +35,8 @@ async function request(url, { method = 'GET', body, auth = true } = {}) {
     throw new Error(data.message || '登录已失效，请重新登录')
   }
   if (data.code !== 0) {
-    throw new Error(data.message || '请求失败')
+    // 带上 HTTP 状态码：路由 404 / 下游 503 这类问题一眼能看出来
+    throw new Error(data.message || `请求失败（HTTP ${response.status}）`)
   }
   return data.data
 }
