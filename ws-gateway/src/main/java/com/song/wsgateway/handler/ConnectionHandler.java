@@ -2,6 +2,7 @@ package com.song.wsgateway.handler;
 
 import com.song.wsgateway.session.ChannelAttrs;
 import com.song.wsgateway.session.ChannelManager;
+import com.song.wsgateway.session.CloseReason;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
@@ -69,6 +70,7 @@ public class ConnectionHandler extends ChannelInboundHandlerAdapter {
 
         // ② 空闲超时：IdleStateHandler 只会"报警"，真正关连接要我们自己动手
         if (evt instanceof IdleStateEvent) {
+            ctx.channel().attr(ChannelAttrs.CLOSE_REASON).set(CloseReason.IDLE_TIMEOUT);
             log.info("空闲超时，主动断开 connId={} userId={}",
                     connId, ctx.channel().attr(ChannelAttrs.USER_ID).get());
             ctx.close();
@@ -88,10 +90,12 @@ public class ConnectionHandler extends ChannelInboundHandlerAdapter {
         }
 
         Long connectTime = ctx.channel().attr(ChannelAttrs.CONNECT_TIME).get();
-        log.info("连接关闭 connId={} userId={} 存活={}",
-                connId,
-                ctx.channel().attr(ChannelAttrs.USER_ID).get(),
-                connectTime == null ? "未完成握手" : formatDuration(System.currentTimeMillis() - connectTime));
+        CloseReason reason = ctx.channel().attr(ChannelAttrs.CLOSE_REASON).get();
+        log.info("连接关闭 connId={} userId={} 存活={} 原因={}",
+        connId,
+        ctx.channel().attr(ChannelAttrs.USER_ID).get(),
+        connectTime == null ? "未完成握手" : formatDuration(System.currentTimeMillis() - connectTime),
+        (reason == null ? CloseReason.CLIENT_CLOSED : reason).getCode());
 
         // 必须继续往后传，否则下游 handler 收不到"连接已关闭"
         super.channelInactive(ctx);
@@ -99,6 +103,7 @@ public class ConnectionHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        ctx.channel().attr(ChannelAttrs.CLOSE_REASON).set(CloseReason.ERROR);
         log.warn("连接异常 connId={} msg={}", connId, cause.getMessage());
         ctx.close();
     }

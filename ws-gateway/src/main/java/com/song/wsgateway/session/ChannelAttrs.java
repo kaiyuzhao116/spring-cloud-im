@@ -18,6 +18,9 @@ public final class ChannelAttrs {
     /** token 过期时间（毫秒），用于主动断开已过期的连接 */
     public static final AttributeKey<Long> TOKEN_EXP = AttributeKey.valueOf("tokenExp");
 
+    /** 关闭原因；不设置时视为对端主动关闭 */
+    public static final AttributeKey<CloseReason> CLOSE_REASON = AttributeKey.valueOf("closeReason");
+
     /**
      * 握手完成时间（毫秒），用来计算连接存活时长。
      *
