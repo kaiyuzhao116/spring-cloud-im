@@ -1,26 +1,26 @@
 @echo off
-chcp 65001 >nul
+chcp 936 >nul
 title spring_cloud.sys_user
 
 set "MYSQL=C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe"
 
 echo ============================================
-echo  MySQL å®žä¾‹ä¸Žæ•°æ®ç›®å½•
+echo   MySQL ÊµÀýÓëÊý¾ÝÄ¿Â¼
 echo ============================================
 "%MYSQL%" -uroot -p123456 -t -e "SELECT @@hostname AS host, @@port AS port, @@version AS version, @@datadir AS datadir;" 2>nul
 
 echo.
 echo ============================================
-echo  spring_cloud.sys_user å…¨éƒ¨æ•°æ®
+echo   spring_cloud.sys_user È«²¿Êý¾Ý
 echo ============================================
 "%MYSQL%" -uroot -p123456 -t -e "SELECT id, account, nickname, status, created_at, LEFT(password_hash,20) AS hash_head FROM spring_cloud.sys_user;" 2>nul
 
 echo.
 echo ============================================
-echo  è¡¨ç»“æž„
+echo   ±í½á¹¹
 echo ============================================
 "%MYSQL%" -uroot -p123456 -t -e "DESC spring_cloud.sys_user;" 2>nul
 
 echo.
-echo æŒ‰ä»»æ„é”®å…³é—­...
+echo °´ÈÎÒâ¼ü¹Ø±Õ...
 pause >nul

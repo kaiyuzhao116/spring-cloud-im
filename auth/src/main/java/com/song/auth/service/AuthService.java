@@ -15,8 +15,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.util.UUID;
-
 /**
  * 登录编排：失败计数 → 查用户 → 校验密码 → 建会话 → 签 token。
  */
@@ -69,30 +67,12 @@ public class AuthService {
         }
         sessionManager.clearFailCount(account);
 
-        // 4. 建会话 + 初始化版本号
-        String sessionId = UUID.randomUUID().toString().replace("-", "");
-        sessionManager.initVersion(user.getId());
-        sessionManager.create(sessionId, user.getId(), deviceType, ip, userAgent,
-                jwtProperties.getSessionTtlSeconds());
+        // 4. 签发 token（精简版：payload 只有 sub / iat / exp）
+        String accessToken = jwtManager.sign(user.getId());
 
-        // 5. 签发 token（ver 取当前版本）
-        int version = sessionManager.currentVersion(user.getId());
-        String accessToken = jwtManager.sign(user.getId(), sessionId, deviceType, version);
-
-        log.info("登录成功 userId={}, account={}, deviceType={}, sid={}", user.getId(), account, deviceType, sessionId);
+        log.info("登录成功 userId={}, account={}, deviceType={}", user.getId(), account, deviceType);
         return new LoginResponse(user.getId(), user.getNickname(), accessToken,
-                jwtManager.getExpireSeconds(), sessionId, deviceType);
-    }
-
-    /**
-     * 退出当前设备：删除会话后，该 token 到期便无法续期。
-     */
-    public void logout(Long userId, String sessionId) {
-        if (sessionId == null || sessionId.isBlank()) {
-            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "会话信息缺失");
-        }
-        sessionManager.delete(sessionId);
-        log.info("退出登录 userId={}, sid={}", userId, sessionId);
+                jwtManager.getExpireSeconds(), deviceType);
     }
 
 }

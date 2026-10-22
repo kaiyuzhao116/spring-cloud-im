@@ -9,7 +9,6 @@ import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
 import org.springframework.core.io.buffer.DataBuffer;
-import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -23,8 +22,10 @@ import reactor.core.publisher.Mono;
 import java.nio.charset.StandardCharsets;
 
 /**
- * 网关核心过滤器：白名单放行 → 验签 → 比对 token 版本号 → 注入身份头。
- * <p>只做"对账"，不查会话明细，不调 auth 服务。</p>
+ * 网关核心过滤器：白名单放行 → 验签 → 注入 X-User-Id。
+ *
+ * <p>精简版只做两件事：验签（sub/iat/exp 由 jjwt 自动校验）和注入用户 ID。
+ * 不再校验版本号、不注入 sessionId / deviceType，也不访问 Redis。</p>
  */
 @Component
 public class AuthGlobalFilter implements GlobalFilter, Ordered {
@@ -33,25 +34,15 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
 
     private static final String HEADER_USER_ID = "X-User-Id";
 
-    private static final String HEADER_SESSION_ID = "X-Session-Id";
-
-    private static final String HEADER_DEVICE_TYPE = "X-Device-Type";
-
-    private static final String VERSION_KEY_FORMAT = "auth:user:%s:ver";
-
     private final AntPathMatcher pathMatcher = new AntPathMatcher();
 
     private final AuthProperties authProperties;
 
     private final JwtVerifier jwtVerifier;
 
-    private final ReactiveStringRedisTemplate redisTemplate;
-
-    public AuthGlobalFilter(AuthProperties authProperties, JwtVerifier jwtVerifier,
-                            ReactiveStringRedisTemplate redisTemplate) {
+    public AuthGlobalFilter(AuthProperties authProperties, JwtVerifier jwtVerifier) {
         this.authProperties = authProperties;
         this.jwtVerifier = jwtVerifier;
-        this.redisTemplate = redisTemplate;
     }
 
     @Override
@@ -75,35 +66,18 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         }
 
         String userId = claims.getSubject();
-        String sessionId = claims.get("sid") == null ? "" : claims.get("sid").toString();
-        String deviceType = claims.get("dev") == null ? "" : claims.get("dev").toString();
-        String tokenVersion = claims.get("ver") == null ? "0" : claims.get("ver").toString();
+        if (userId == null || userId.isBlank()) {
+            return unauthorized(exchange, "登录已失效，请重新登录");
+        }
 
-        // 版本号比对：token 上的 ver 必须等于 Redis 当前 ver，否则说明已被踢/被封号
-        return redisTemplate.opsForValue()
-                .get(String.format(VERSION_KEY_FORMAT, userId))
-                .defaultIfEmpty("0")
-                .flatMap(currentVersion -> {
-                    if (!currentVersion.equals(tokenVersion)) {
-                        return unauthorized(exchange, "凭证已失效，请重新登录");
-                    }
-                    ServerHttpRequest request = exchange.getRequest().mutate()
-                            .headers(headers -> {
-                                // 先剥离外部伪造的身份头，再写入可信值
-                                headers.remove(HEADER_USER_ID);
-                                headers.remove(HEADER_SESSION_ID);
-                                headers.remove(HEADER_DEVICE_TYPE);
-                                headers.set(HEADER_USER_ID, userId);
-                                headers.set(HEADER_SESSION_ID, sessionId);
-                                headers.set(HEADER_DEVICE_TYPE, deviceType);
-                            })
-                            .build();
-                    return chain.filter(exchange.mutate().request(request).build());
+        ServerHttpRequest request = exchange.getRequest().mutate()
+                .headers(headers -> {
+                    // 先剥离外部伪造的身份头，再写入可信值
+                    headers.remove(HEADER_USER_ID);
+                    headers.set(HEADER_USER_ID, userId);
                 })
-                .onErrorResume(e -> {
-                    log.error("鉴权依赖异常", e);
-                    return unauthorized(exchange, "鉴权服务暂不可用");
-                });
+                .build();
+        return chain.filter(exchange.mutate().request(request).build());
     }
 
     private boolean isWhiteList(String path) {

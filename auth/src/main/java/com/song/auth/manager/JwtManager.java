@@ -13,16 +13,19 @@ import java.util.Date;
 
 /**
  * JWT 签发与解析。
- * <p>token 只带 uid / sid / dev / ver，不放权限列表。</p>
+ *
+ * <p>精简版：payload 只有三个字段</p>
+ * <pre>
+ * sub  : 用户 ID       → 网关解出后注入 X-User-Id
+ * iat  : 签发时间       → 排查问题时看"什么时候登的"
+ * exp  : 过期时间       → 验签时自动校验，过期即 401
+ * </pre>
+ *
+ * <p>以后要加字段就在 {@link #sign(Long)} 里加一行 {@code .claim("xxx", value)}，
+ * 网关用 {@code claims.get("xxx")} 读取即可，不需要改结构。</p>
  */
 @Component
 public class JwtManager {
-
-    public static final String CLAIM_SESSION_ID = "sid";
-
-    public static final String CLAIM_DEVICE_TYPE = "dev";
-
-    public static final String CLAIM_VERSION = "ver";
 
     private final JwtProperties properties;
 
@@ -33,13 +36,13 @@ public class JwtManager {
         this.key = Keys.hmacShaKeyFor(properties.getSecret().getBytes(StandardCharsets.UTF_8));
     }
 
-    public String sign(Long userId, String sessionId, String deviceType, int version) {
+    /**
+     * 签发 token：只放 sub / iat / exp。
+     */
+    public String sign(Long userId) {
         Instant now = Instant.now();
         return Jwts.builder()
                 .subject(String.valueOf(userId))
-                .claim(CLAIM_SESSION_ID, sessionId)
-                .claim(CLAIM_DEVICE_TYPE, deviceType)
-                .claim(CLAIM_VERSION, version)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plusSeconds(properties.getExpireSeconds())))
                 .signWith(key)

@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, ref } from 'vue'
-import { clearSession, fetchProfile, getSessionId, getToken, login, logout, setSession } from './api'
+import { clearSession, fetchProfile, getToken, login, logout, setToken } from './api'
 
 const account = ref('admin')
 const password = ref('123456')
@@ -8,7 +8,6 @@ const loading = ref(false)
 const error = ref('')
 const profile = ref(null)
 const token = ref(getToken())
-const sessionId = ref(getSessionId())
 const showToken = ref(false)
 
 function formatTime(epochMillis) {
@@ -23,7 +22,6 @@ async function loadProfile() {
     error.value = e.message
     clearSession()
     token.value = ''
-    sessionId.value = ''
   }
 }
 
@@ -40,9 +38,8 @@ async function handleLogin() {
       password: password.value,
       deviceType: 'WEB'
     })
-    setSession(data.accessToken, data.sessionId)
+    setToken(data.accessToken)
     token.value = data.accessToken
-    sessionId.value = data.sessionId
     await loadProfile()
   } catch (e) {
     error.value = e.message
@@ -55,11 +52,10 @@ async function handleLogout() {
   try {
     await logout()
   } catch (e) {
-    // 退出失败也要清本地，避免用户卡在登录态
+    // 精简版 logout 是服务端空实现，本地清理才是关键
   }
   clearSession()
   token.value = ''
-  sessionId.value = ''
   profile.value = null
   showToken.value = false
 }
@@ -123,8 +119,8 @@ onMounted(() => {
             <dd>{{ formatTime(profile.createdAt) }}</dd>
           </div>
           <div>
-            <dt>会话 ID（sid）</dt>
-            <dd class="mono">{{ sessionId ? sessionId.slice(0, 12) + '…' : '-' }}</dd>
+            <dt>token 有效期</dt>
+            <dd>30 分钟（精简版：sub / iat / exp）</dd>
           </div>
         </dl>
 

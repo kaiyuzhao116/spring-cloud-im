@@ -1,0 +1,265 @@
+{
+  "info": {
+    "name": "spring_cloud 登录链路验证",
+    "description": "URL 为完整字符串地址，不依赖环境变量与前缀。导入后直接发送即可。",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "01 依赖健康（L0）",
+      "item": [
+        {
+          "name": "Nacos 服务列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "http://127.0.0.1:8848/nacos/v1/ns/service/list?pageNo=1&pageSize=20&namespaceId=public"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const doms = (pm.response.json().doms || []).join(',');",
+                  "pm.test('user 已注册', () => pm.expect(doms).to.include('user'));",
+                  "pm.test('auth 已注册', () => pm.expect(doms).to.include('auth'));",
+                  "pm.test('api-gateway 已注册', () => pm.expect(doms).to.include('api-gateway'));",
+                  "console.log('全部服务:', doms);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "网关健康",
+          "request": { "method": "GET", "header": [], "url": "http://127.0.0.1:8080/actuator/health" },
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('网关 UP', () => pm.expect(pm.response.json().status).to.eql('UP'));"] } }
+          ]
+        },
+        {
+          "name": "user 健康",
+          "request": { "method": "GET", "header": [], "url": "http://127.0.0.1:8084/actuator/health" }
+        }
+      ]
+    },
+    {
+      "name": "02 直连服务（L1，绕过网关）",
+      "item": [
+        {
+          "name": "直连 auth 登录（路径 /login）",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"account\":\"admin\",\"password\":\"123456\",\"deviceType\":\"WEB\"}", "options": { "raw": { "language": "json" } } },
+            "url": "http://127.0.0.1:8083/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('直连登录成功', () => pm.expect(pm.response.json().code).to.eql(0));",
+                  "console.log('sid =', pm.response.json().data.sessionId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "直连 user + 手工身份头（200）",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-User-Id", "value": "1" }],
+            "url": "http://127.0.0.1:8084/profile"
+          },
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('user 只信请求头', () => pm.expect(pm.response.json().data.account).to.eql('admin'));"] } }
+          ]
+        },
+        {
+          "name": "直连 user 不带身份头（401）",
+          "request": { "method": "GET", "header": [], "url": "http://127.0.0.1:8084/profile" },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('服务侧业务错误: HTTP 200 但 body.code=401', () => { pm.expect(pm.response.code).to.eql(200); pm.expect(pm.response.json().code).to.eql(401); });",
+                  "pm.test('消息来自 user 而非网关', () => pm.expect(pm.response.json().message).to.include('缺少身份信息'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 走网关（L2/L3）",
+      "item": [
+        {
+          "name": "网关登录（自动保存 token 与 sid）",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"account\":\"admin\",\"password\":\"123456\",\"deviceType\":\"WEB\"}", "options": { "raw": { "language": "json" } } },
+            "url": "http://127.0.0.1:8080/api/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('code=0', () => pm.expect(pm.response.json().code).to.eql(0));",
+                  "pm.environment.set('token', pm.response.json().data.accessToken);",
+                  "console.log('token 已写入环境');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "带 token 拉资料（200）",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "http://127.0.0.1:8080/api/user/profile"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('code=0', () => pm.expect(pm.response.json().code).to.eql(0));",
+                  "pm.test('昵称是管理员', () => pm.expect(pm.response.json().data.nickname).to.eql('管理员'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "无 token（401 未登录）",
+          "request": { "method": "GET", "header": [], "url": "http://127.0.0.1:8080/api/user/profile" },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401', () => pm.expect(pm.response.code).to.eql(401));",
+                  "pm.test('消息来自网关', () => pm.expect(pm.response.json().message).to.include('未登录'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "伪造 token（401 登录已失效）",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer abc.def.ghi" }],
+            "url": "http://127.0.0.1:8080/api/user/profile"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401', () => pm.expect(pm.response.code).to.eql(401));",
+                  "pm.test('验签失败文案', () => pm.expect(pm.response.json().message).to.include('登录已失效'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "伪造身份头 + 无 token（401）",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-User-Id", "value": "1" }],
+            "url": "http://127.0.0.1:8080/api/user/profile"
+          },
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('伪造头也必须 401', () => pm.expect(pm.response.code).to.eql(401));"] } }
+          ]
+        },
+        {
+          "name": "退出登录（精简版空实现，code=0）",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": "http://127.0.0.1:8080/api/auth/logout"
+          },
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('退出成功', () => pm.expect(pm.response.json().code).to.eql(0));"] } }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 失败路径（L5）",
+      "item": [
+        {
+          "name": "密码错误（401 统一文案）",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"account\":\"admin\",\"password\":\"wrongpass\",\"deviceType\":\"WEB\"}", "options": { "raw": { "language": "json" } } },
+            "url": "http://127.0.0.1:8080/api/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200 + body.code=401', () => { pm.expect(pm.response.code).to.eql(200); pm.expect(pm.response.json().code).to.eql(401); });",
+                  "pm.test('文案与账号不存在一致', () => pm.expect(pm.response.json().message).to.eql('账号或密码错误'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "账号不存在（同样文案，防枚举）",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"account\":\"nobody\",\"password\":\"123456\",\"deviceType\":\"WEB\"}", "options": { "raw": { "language": "json" } } },
+            "url": "http://127.0.0.1:8080/api/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200 + body.code=401', () => { pm.expect(pm.response.code).to.eql(200); pm.expect(pm.response.json().code).to.eql(401); });",
+                  "pm.test('文案相同', () => pm.expect(pm.response.json().message).to.eql('账号或密码错误'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "参数为空（400 校验失败）",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"account\":\"\",\"password\":\"\",\"deviceType\":\"WEB\"}", "options": { "raw": { "language": "json" } } },
+            "url": "http://127.0.0.1:8080/api/auth/login"
+          },
+          "event": [
+            { "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('400 参数校验', () => pm.expect(pm.response.json().code).to.eql(400));"] } }
+          ]
+        }
+      ]
+    }
+  ]
+}

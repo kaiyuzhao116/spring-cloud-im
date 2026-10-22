@@ -4,7 +4,6 @@ import com.song.auth.domain.LoginRequest;
 import com.song.auth.domain.LoginResponse;
 import com.song.auth.service.AuthService;
 import com.song.common.Result;
-import com.song.common.UserContext;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -29,9 +28,13 @@ public class AuthController {
         return Result.ok(authService.login(request, clientIp(httpRequest), httpRequest.getHeader("User-Agent")));
     }
 
+    /**
+     * 退出登录。
+     * <p>精简版 token 无会话标识，服务端无法主动作废某个 token；
+     * 正确做法是客户端删除本地 token。将来加了 sid / refreshToken 后再实现服务端失效。</p>
+     */
     @PostMapping("/logout")
     public Result<Void> logout() {
-        authService.logout(UserContext.getUserId(), UserContext.getSessionId());
         return Result.ok();
     }
 
