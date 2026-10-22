@@ -4,10 +4,8 @@ import com.song.wsgateway.session.ChannelAttrs;
 import com.song.wsgateway.session.ChannelManager;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.timeout.IdleStateEvent;
-import io.netty.util.ReferenceCountUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -61,20 +59,6 @@ public class ConnectionHandler extends ChannelInboundHandlerAdapter {
         }
         log.info("连接关闭 connId={} userId={}", connId, ctx.channel().attr(ChannelAttrs.USER_ID).get());
         super.channelInactive(ctx);
-    }
-
-    @Override
-    public void channelRead(ChannelHandlerContext ctx, Object msg) {
-        if (msg instanceof TextWebSocketFrame frame) {
-            try {
-                log.info("收到帧 connId={} userId={} text={}",
-                        connId, ctx.channel().attr(ChannelAttrs.USER_ID).get(), frame.text());
-            } finally {
-                ReferenceCountUtil.release(frame);
-            }
-            return;
-        }
-        ReferenceCountUtil.release(msg);
     }
 
     @Override

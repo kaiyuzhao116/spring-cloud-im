@@ -1,8 +1,10 @@
 package com.song.wsgateway.server;
 
 import com.song.wsgateway.handler.AuthHandshakeHandler;
+import com.song.wsgateway.handler.BusinessHandler;
 import com.song.wsgateway.handler.ConnectionHandler;
 import com.song.wsgateway.session.ChannelManager;
+import com.song.wsgateway.support.ImClient;
 import com.song.wsgateway.support.JwtVerifier;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
@@ -19,9 +21,11 @@ import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.timeout.IdleStateHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -43,6 +47,10 @@ public class NettyServer implements SmartLifecycle {
 
     private final ChannelManager channelManager;
 
+    private final ImClient imClient;
+
+    private final ExecutorService bizExecutor;
+
     private EventLoopGroup bossGroup;
 
     private EventLoopGroup workerGroup;
@@ -51,10 +59,13 @@ public class NettyServer implements SmartLifecycle {
 
     private volatile boolean running;
 
-    public NettyServer(NettyProperties properties, JwtVerifier jwtVerifier, ChannelManager channelManager) {
+    public NettyServer(NettyProperties properties, JwtVerifier jwtVerifier, ChannelManager channelManager,
+                       ImClient imClient, @Qualifier("bizExecutor") ExecutorService bizExecutor) {
         this.properties = properties;
         this.jwtVerifier = jwtVerifier;
         this.channelManager = channelManager;
+        this.imClient = imClient;
+        this.bizExecutor = bizExecutor;
     }
 
     @Override
@@ -109,6 +120,7 @@ public class NettyServer implements SmartLifecycle {
                 .addLast(new AuthHandshakeHandler(jwtVerifier))
                 .addLast(new WebSocketServerProtocolHandler(wsConfig))
                 .addLast(new IdleStateHandler(0, 0, properties.getHeartbeatIdleSeconds()))
+                .addLast(new BusinessHandler(imClient, bizExecutor))
                 .addLast(new ConnectionHandler(channelManager));
     }
 

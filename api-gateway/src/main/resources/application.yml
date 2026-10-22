@@ -37,6 +37,12 @@ spring:
             - Path=/api/user/**
           filters:
             - StripPrefix=2
+        - id: im
+          uri: lb://im
+          predicates:
+            - Path=/api/im/**
+          filters:
+            - StripPrefix=2
         - id: account
           uri: lb://account
           predicates:
