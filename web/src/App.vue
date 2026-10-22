@@ -53,10 +53,14 @@ function handleFrame(frame) {
   }
   if (frame.type === 'ACK') {
     const target = messages.value.find((m) => m.key === frame.cid)
-    if (target) {
-      target.seq = frame.seq
-      target.status = 'sent'
+    if (!target) return
+    if (!frame.seq) {
+      // seq=0 表示服务端没存成：转成"发送失败"，不要让用户以为还在发
+      target.status = 'failed'
+      return
     }
+    target.seq = frame.seq
+    target.status = 'sent'
   }
 }
 
@@ -217,10 +221,11 @@ onBeforeUnmount(() => {
           <p v-if="messages.length === 0" class="empty">还没有消息，说点什么吧</p>
 
           <div v-for="msg in messages" :key="msg.key" class="row" :class="msg.mine ? 'mine' : 'peer'">
-            <div class="bubble">{{ msg.content }}</div>
+            <div class="bubble" :class="{ failed: msg.status === 'failed' }">{{ msg.content }}</div>
             <span class="meta">
               <template v-if="msg.mine">
                 <span v-if="msg.status === 'sending'">发送中…</span>
+                <span v-else-if="msg.status === 'failed'" class="failed-text">发送失败，请重发</span>
                 <span v-else>seq {{ msg.seq }}</span>
               </template>
               <template v-else>seq {{ msg.seq }}</template>

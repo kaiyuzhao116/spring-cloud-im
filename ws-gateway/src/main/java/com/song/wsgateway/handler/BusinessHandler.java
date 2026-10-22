@@ -83,10 +83,9 @@ public class BusinessHandler extends SimpleChannelInboundHandler<TextWebSocketFr
             send(ctx, Frame.ack(in.getCid(), result.getSeq()));
         } catch (Exception e) {
             log.error("调用 im 失败 from={} to={} cid={}", fromUid, in.getTo(), in.getCid(), e);
-            if (ctx.channel().isActive()) {
-                ctx.writeAndFlush(new TextWebSocketFrame(
-                        "{\"type\":\"ACK\",\"cid\":\"" + in.getCid() + "\",\"seq\":0}"));
-            }
+            // 失败也要回 ACK（seq=0 表示没存成），否则客户端那条消息会一直停在"发送中"
+            // 用 Frame + Jackson 序列化，避免 cid 里的引号破坏 JSON
+            send(ctx, Frame.ack(in.getCid(), 0L));
         }
     }
 
