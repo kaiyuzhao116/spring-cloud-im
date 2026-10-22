@@ -35,6 +35,8 @@ dubbo:
   protocol:
     name: dubbo
     port: 20885
+    # 本机开发：Dubbo 广播地址固定回环，避免 IP 变化后消费方连不上
+    host: 127.0.0.1
   consumer:
     check: false
     timeout: 3000

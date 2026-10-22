@@ -16,6 +16,8 @@ spring:
       discovery:
         namespace: public
         group: DEFAULT_GROUP
+        # 本机开发固定注册 127.0.0.1：换 Wi-Fi/VPN 后 IP 变化会导致路由指向旧 IP
+        ip: 127.0.0.1
     gateway:
       discovery:
         locator:
