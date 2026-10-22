@@ -1,6 +1,18 @@
+server:
+  port: 8085
+
 spring:
   application:
     name: im
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/spring_cloud?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: 123456
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
   cloud:
     nacos:
       server-addr: 127.0.0.1:8848
@@ -16,7 +28,7 @@ spring:
     import:
       - optional:nacos:im.yaml
 
-# 纯 Dubbo Provider，不占用 HTTP 端口
+# Dubbo Provider（对外提供消息/会话接口）+ HTTP 8085（联调用）
 dubbo:
   application:
     name: im

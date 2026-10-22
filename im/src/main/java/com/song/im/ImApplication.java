@@ -6,12 +6,15 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 
 /**
- * IM 服务：消息、会话、群。MVP 阶段为 Dubbo Provider 单体，
+ * IM 服务：消息、会话、群。MVP 阶段为单体（Dubbo Provider + HTTP 8085），
  * 内部按 message / conversation / group 分包，后续可平移到独立服务。
+ *
+ * <p>scanBasePackages = "com.song"：让 spring-cloud-common 里的
+ * GlobalExceptionHandler、UserContextInterceptor 生效。</p>
  */
 @EnableDubbo
 @EnableDiscoveryClient
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = "com.song")
 public class ImApplication {
 
     public static void main(String[] args) {

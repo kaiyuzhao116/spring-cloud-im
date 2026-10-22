@@ -1,0 +1,106 @@
+package com.song.im.repository;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
+import org.springframework.stereotype.Repository;
+
+import java.sql.PreparedStatement;
+import java.sql.Statement;
+import java.sql.Timestamp;
+import java.util.List;
+
+/**
+ * 消息与会话卡片的数据库访问。
+ *
+ * <p>发一条消息 = 1 行 im_message + 2 行 im_conversation_member（双方各一行）。</p>
+ */
+@Repository
+public class MessageRepository {
+
+    private static final String INSERT_MESSAGE = """
+            INSERT INTO im_message (conversation_id, seq, from_uid, to_uid, msg_type, content, client_msg_id)
+            VALUES (?, ?, ?, ?, 1, ?, ?)
+            """;
+
+    /** 发送方那行：自己发的消息当然已读，所以 last_read_seq 跟着推进 */
+    private static final String UPSERT_SENDER = """
+            INSERT INTO im_conversation_member
+                (conversation_id, uid, peer_uid, last_seq, last_read_seq, last_msg_preview, last_msg_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                last_seq = VALUES(last_seq),
+                last_read_seq = VALUES(last_read_seq),
+                last_msg_preview = VALUES(last_msg_preview),
+                last_msg_at = VALUES(last_msg_at)
+            """;
+
+    /** 接收方那行：只推进 last_seq（未读 +1），绝不动 last_read_seq */
+    private static final String UPSERT_RECEIVER = """
+            INSERT INTO im_conversation_member
+                (conversation_id, uid, peer_uid, last_seq, last_msg_preview, last_msg_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                last_seq = VALUES(last_seq),
+                last_msg_preview = VALUES(last_msg_preview),
+                last_msg_at = VALUES(last_msg_at)
+            """;
+
+    private final JdbcTemplate jdbcTemplate;
+
+    public MessageRepository(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    /** 该会话当前最大的 seq（用于 Redis 计数器丢失时恢复） */
+    public long maxSeq(String conversationId) {
+        Long value = jdbcTemplate.queryForObject(
+                "SELECT COALESCE(MAX(seq), 0) FROM im_message WHERE conversation_id = ?",
+                Long.class, conversationId);
+        return value == null ? 0L : value;
+    }
+
+    /** 按幂等键查已存在的消息 */
+    public MessageRow findByClientMsgId(long fromUid, String clientMsgId) {
+        List<MessageRow> rows = jdbcTemplate.query(
+                "SELECT id, seq FROM im_message WHERE from_uid = ? AND client_msg_id = ?",
+                (rs, rowNum) -> new MessageRow(rs.getLong("id"), rs.getLong("seq")),
+                fromUid, clientMsgId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    /** 插入消息，返回自增主键 */
+    public long insert(String conversationId, long seq, long fromUid, long toUid,
+                       String content, String clientMsgId) {
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        jdbcTemplate.update(connection -> {
+            PreparedStatement ps = connection.prepareStatement(INSERT_MESSAGE, Statement.RETURN_GENERATED_KEYS);
+            ps.setString(1, conversationId);
+            ps.setLong(2, seq);
+            ps.setLong(3, fromUid);
+            ps.setLong(4, toUid);
+            ps.setString(5, content);
+            ps.setString(6, clientMsgId);
+            return ps;
+        }, keyHolder);
+        Number key = keyHolder.getKey();
+        return key == null ? 0L : key.longValue();
+    }
+
+    /**
+     * 更新双方会话卡片。
+     *
+     * <p>发送方：last_seq 与 last_read_seq 都推到 seq（自己发的消息不算未读）；
+     * 接收方：只推 last_seq，未读 = last_seq - last_read_seq 自然增加。</p>
+     */
+    public void upsertMembers(String conversationId, long fromUid, long toUid,
+                              long seq, String preview, Timestamp messageTime) {
+        jdbcTemplate.update(UPSERT_SENDER,
+                conversationId, fromUid, toUid, seq, seq, preview, messageTime);
+        jdbcTemplate.update(UPSERT_RECEIVER,
+                conversationId, toUid, fromUid, seq, preview, messageTime);
+    }
+
+    public record MessageRow(long id, long seq) {
+    }
+}

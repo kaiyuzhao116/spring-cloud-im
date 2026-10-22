@@ -19,10 +19,24 @@
             <artifactId>spring-cloud-api</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <!-- 纯 Dubbo Provider，不引入 web -->
+        <!-- HTTP 端口 8085：便于 Apifox 直测，后续给网关提供 /api/im/** 读接口 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter</artifactId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- seq 生成（会话内自增序号） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
         <dependency>
             <groupId>com.alibaba.cloud</groupId>
