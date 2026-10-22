@@ -40,6 +40,12 @@
             <artifactId>dubbo-registry-nacos</artifactId>
         </dependency>
 
+        <!-- JSON 编解码（帧序列化，版本由 Spring Boot BOM 管理） -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
         <!-- JWT 验签（版本由父 pom 管理） -->
         <dependency>
             <groupId>io.jsonwebtoken</groupId>
