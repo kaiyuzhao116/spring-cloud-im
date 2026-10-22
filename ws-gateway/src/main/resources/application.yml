@@ -19,6 +19,10 @@ netty:
 ws:
   jwt:
     secret: spring-cloud-im-demo-jwt-secret-key-please-change-in-prod
+  # 业务线程池（承接 Dubbo 调用）：队列满时由 IO 线程自己执行，形成背压
+  biz:
+    threads: 8
+    queue-capacity: 5000
 
 dubbo:
   application:
