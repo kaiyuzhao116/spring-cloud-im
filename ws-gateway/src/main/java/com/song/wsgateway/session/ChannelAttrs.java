@@ -18,6 +18,14 @@ public final class ChannelAttrs {
     /** token 过期时间（毫秒），用于主动断开已过期的连接 */
     public static final AttributeKey<Long> TOKEN_EXP = AttributeKey.valueOf("tokenExp");
 
+    /**
+     * 握手完成时间（毫秒），用来计算连接存活时长。
+     *
+     * <p>用包装类 {@code Long} 而非 {@code long}：握手失败的连接没有这个值，
+     * 读取时需要能判断 null。</p>
+     */
+    public static final AttributeKey<Long> CONNECT_TIME = AttributeKey.valueOf("connectTime");
+
     private ChannelAttrs() {
     }
 }
