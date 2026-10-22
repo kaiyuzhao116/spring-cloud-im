@@ -10,6 +10,11 @@ netty:
   heartbeat-idle-seconds: 60
   max-frame-length: 65536
 
+# WS 握手验签：必须与 auth 的 jwt.secret 完全一致
+ws:
+  jwt:
+    secret: spring-cloud-im-demo-jwt-secret-key-please-change-in-prod
+
 dubbo:
   application:
     name: ws-gateway
