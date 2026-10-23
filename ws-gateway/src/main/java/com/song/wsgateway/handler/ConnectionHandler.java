@@ -48,7 +48,8 @@ public class ConnectionHandler extends ChannelInboundHandlerAdapter {
     public ConnectionHandler(ChannelManager channelManager) {
         this.channelManager = channelManager;
     }
-
+//userEventTriggered 是 Netty 用来通知"某个非 IO 事件发生了"的统一入口，HandshakeComplete 
+// 是 WebSocketServerProtocolHandler 在 101 完成后抛出的具体事件对象；我们用 instanceof 认出它
     @Override
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
         // ① 握手成功：这是"连接真正可用"的时刻，登记身份与时间
