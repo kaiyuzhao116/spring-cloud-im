@@ -18,14 +18,20 @@ import org.slf4j.LoggerFactory;
 import java.util.concurrent.ExecutorService;
 
 /**
- * 业务帧处理：
- * <pre>
- * PING  → 立即回 PONG（轻量，留在 EventLoop）
- * MSG   → 丢进业务线程池 → Dubbo 调 im 落库 → 回 ACK（cid + seq）
- * 其它  → 忽略并记日志
- * </pre>
+ * 业务帧处理（上行）。
  *
- * <p>铁律：Dubbo 是阻塞调用，只能在业务线程池里执行。</p>
+ * <p>职责只有四件事：</p>
+ * <ol>
+ *   <li>限大小：单帧超过 4KB 直接以 1009 断开（不解码，省内存）</li>
+ *   <li>分流：PING 当场回 PONG；MSG 交给业务线程池</li>
+ *   <li>落库：MSG 通过 Dubbo 调 im 存下来，拿到 seq</li>
+ *   <li>回执：无论成功失败都回 ACK，<b>seq=0 表示落库失败</b></li>
+ * </ol>
+ *
+ * <p>铁律：Dubbo 是阻塞调用，只能在业务线程池（ws-biz-*）里执行，
+ * 绝不能占用 Netty 的 EventLoop。</p>
+ *
+ * <p>行文约定：{@code seq == 0} 是"没存成"的哨兵值，客户端据此显示发送失败。</p>
  */
 public class BusinessHandler extends SimpleChannelInboundHandler<TextWebSocketFrame> {
 
@@ -33,8 +39,14 @@ public class BusinessHandler extends SimpleChannelInboundHandler<TextWebSocketFr
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /** 单帧业务上限：4KB（协议层上限由 netty.max-frame-length 控制，这里是业务层） */
+    /** 单帧业务上限：4KB。协议层 64KB 由 netty.max-frame-length 控制，这里是业务层 */
     private static final int MAX_TEXT_BYTES = 4096;
+
+    /** WebSocket 标准关闭码：消息过大（RFC 6455） */
+    private static final int CLOSE_MESSAGE_TOO_BIG = 1009;
+
+    /** 落库失败时回给客户端的 seq */
+    private static final long SEQ_FAILED = 0L;
 
     private final ImClient imClient;
 
@@ -45,32 +57,43 @@ public class BusinessHandler extends SimpleChannelInboundHandler<TextWebSocketFr
         this.bizExecutor = bizExecutor;
     }
 
+    // ==================== 入口 ====================
+
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, TextWebSocketFrame frame) {
-
-        // ★ 先看字节数，超了直接断，避免把大字符串解码成 String（那才是真正吃内存的一步）
-        //frame.text()              // 先把字节解码成 String（这一步就吃内存）
-        //frame.content().readableBytes()   // 直接看字节数，不解码
-        int bytes = frame.content().readableBytes();
-        if (bytes > MAX_TEXT_BYTES) {
-            log.warn("帧过大，断开连接 userId={} bytes={}",
-                    ctx.channel().attr(ChannelAttrs.USER_ID).get(), bytes);
-
-            ctx.channel().attr(ChannelAttrs.CLOSE_REASON).set(CloseReason.MESSAGE_TOO_BIG);
-            ctx.writeAndFlush(new CloseWebSocketFrame(1009, "message too big"))
-                    .addListener(ChannelFutureListener.CLOSE);
-            return;      // 不再往下走，不解析、不落库
-        }
-
-        Frame in;
-        try {
-            in = MAPPER.readValue(frame.text(), Frame.class);
-        } catch (Exception e) {
-            log.warn("帧解析失败 userId={} text={}",
-                    ctx.channel().attr(ChannelAttrs.USER_ID).get(), frame.text());
+        if (isTooLarge(frame)) {
+            rejectTooLarge(ctx, frame);
             return;
         }
 
+        Frame in = parseOrNull(ctx, frame);
+        if (in != null) {
+            dispatch(ctx, in);
+        }
+    }
+
+    private boolean isTooLarge(TextWebSocketFrame frame) {
+        // 用字节数而不是 frame.text()：text() 会先把字节解码成 String，那才是吃内存的一步
+        return frame.content().readableBytes() > MAX_TEXT_BYTES;
+    }
+
+    private void rejectTooLarge(ChannelHandlerContext ctx, TextWebSocketFrame frame) {
+        int bytes = frame.content().readableBytes();
+        log.warn("帧过大，断开连接 userId={} bytes={} 上限={}", userIdOf(ctx), bytes, MAX_TEXT_BYTES);
+        closeWithReason(ctx, CloseReason.MESSAGE_TOO_BIG, CLOSE_MESSAGE_TOO_BIG, "message too big");
+    }
+
+    /** 解析失败返回 null（只记日志，不断连接：可能只是客户端发了条调试消息） */
+    private Frame parseOrNull(ChannelHandlerContext ctx, TextWebSocketFrame frame) {
+        try {
+            return MAPPER.readValue(frame.text(), Frame.class);
+        } catch (Exception e) {
+            log.warn("帧解析失败 userId={} text={}", userIdOf(ctx), frame.text());
+            return null;
+        }
+    }
+
+    private void dispatch(ChannelHandlerContext ctx, Frame in) {
         FrameType type = in.frameType();
         if (type == null) {
             log.warn("未知帧类型，忽略 type={}", in.getType());
@@ -78,39 +101,72 @@ public class BusinessHandler extends SimpleChannelInboundHandler<TextWebSocketFr
         }
 
         switch (type) {
-            case PING -> send(ctx, Frame.pong());
-            case MSG -> bizExecutor.execute(() -> handleMessage(ctx, in));
+            case PING -> sendFrame(ctx, Frame.pong());              // 轻量，留在 EventLoop
+            case MSG -> handleMessageAsync(ctx, in);                // 重活，切线程池
             default -> log.warn("不支持的上行帧 type={}", in.getType());
         }
     }
 
+    // ==================== 发消息 ====================
+
+    /** 交给业务线程池执行，避免阻塞 EventLoop（队列满时由 CallerRunsPolicy 形成背压） */
+    private void handleMessageAsync(ChannelHandlerContext ctx, Frame in) {
+        bizExecutor.execute(() -> handleMessage(ctx, in));
+    }
+
     private void handleMessage(ChannelHandlerContext ctx, Frame in) {
-        Long fromUid = ctx.channel().attr(ChannelAttrs.USER_ID).get();
+        Long fromUid = userIdOf(ctx);
         if (fromUid == null) {
             log.warn("连接上没有 userId，关闭连接");
             ctx.close();
             return;
         }
-        if (in.getTo() == null || in.getCid() == null || in.getContent() == null
-                || in.getCid().isBlank() || in.getContent().isBlank()) {
+
+        if (!hasRequiredFields(in)) {
             log.warn("消息帧缺少必要字段 from={} frame={}", fromUid, in);
             return;
         }
 
+        long seq = persist(ctx, fromUid, in);
+        ackMessage(ctx, in.getCid(), seq);
+    }
+
+    private boolean hasRequiredFields(Frame in) {
+        return in.getTo() != null
+                && in.getCid() != null && !in.getCid().isBlank()
+                && in.getContent() != null && !in.getContent().isBlank();
+    }
+
+    /**
+     * 调用 im 落库。
+     *
+     * @return 会话内序号；失败返回 {@link #SEQ_FAILED}
+     */
+    private long persist(ChannelHandlerContext ctx, long fromUid, Frame in) {
         try {
             SendResultDTO result = imClient.send(fromUid, in.getTo(), in.getCid(), in.getContent());
             log.info("消息已落库 msgId={} conversation={} seq={} from={} to={}",
                     result.getMsgId(), result.getConversationId(), result.getSeq(), fromUid, in.getTo());
-            send(ctx, Frame.ack(in.getCid(), result.getSeq()));
+            return result.getSeq();
         } catch (Exception e) {
             log.error("调用 im 失败 from={} to={} cid={}", fromUid, in.getTo(), in.getCid(), e);
-            // 失败也要回 ACK（seq=0 表示没存成），否则客户端那条消息会一直停在"发送中"
-            // 用 Frame + Jackson 序列化，避免 cid 里的引号破坏 JSON
-            send(ctx, Frame.ack(in.getCid(), 0L));
+            return SEQ_FAILED;
         }
     }
 
-    private void send(ChannelHandlerContext ctx, Frame frame) {
+    /**
+     * 回执：成功带真实 seq，失败带 {@link #SEQ_FAILED}。
+     *
+     * <p>失败也必须回，否则客户端那条消息会一直停在"发送中"。
+     * 走 {@link Frame} 序列化，避免 cid 中的特殊字符破坏 JSON。</p>
+     */
+    private void ackMessage(ChannelHandlerContext ctx, String cid, long seq) {
+        sendFrame(ctx, Frame.ack(cid, seq));
+    }
+
+    // ==================== 出站工具 ====================
+
+    private void sendFrame(ChannelHandlerContext ctx, Frame frame) {
         if (!ctx.channel().isActive()) {
             return;
         }
@@ -121,10 +177,20 @@ public class BusinessHandler extends SimpleChannelInboundHandler<TextWebSocketFr
         }
     }
 
+    /** 带关闭码关连接：先发 Close 帧说明原因，再关闭 */
+    private void closeWithReason(ChannelHandlerContext ctx, CloseReason reason, int code, String text) {
+        ctx.channel().attr(ChannelAttrs.CLOSE_REASON).set(reason);
+        ctx.writeAndFlush(new CloseWebSocketFrame(code, text))
+                .addListener(ChannelFutureListener.CLOSE);
+    }
+
+    private Long userIdOf(ChannelHandlerContext ctx) {
+        return ctx.channel().attr(ChannelAttrs.USER_ID).get();
+    }
+
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        log.warn("业务处理异常 userId={} msg={}",
-                ctx.channel().attr(ChannelAttrs.USER_ID).get(), cause.getMessage());
+        log.warn("业务处理异常 userId={} msg={}", userIdOf(ctx), cause.getMessage());
         ctx.close();
     }
 }

@@ -115,12 +115,21 @@ public class NettyServer implements SmartLifecycle {
                 .build();
 
         ch.pipeline()
+                // ① HTTP 编解码：连接刚建立时走的是普通 HTTP（带 Upgrade: websocket），先要能解析
                 .addLast(new HttpServerCodec())
+                // ② 请求聚合：把 HttpRequest + 若干 HttpContent 拼成完整 FullHttpRequest，
+                //    下一步的验签只认完整请求
                 .addLast(new HttpObjectAggregator(properties.getMaxFrameLength()))
+                // ③ 鉴权：从 query/header 取 token 验签，通过后把 userId、tokenExp 写入 Channel
                 .addLast(new AuthHandshakeHandler(jwtVerifier))
+                // ④ 协议升级：识别 /ws（允许带 query）→ 回 101 → 换成帧编解码；
+                //    之后流动的是 WebSocketFrame，并自动处理 Close / Ping / Pong
                 .addLast(new WebSocketServerProtocolHandler(wsConfig))
+                // ⑤ 空闲检测：超过 N 秒无读写 → 抛出 IdleStateEvent
                 .addLast(new IdleStateHandler(0, 0, properties.getHeartbeatIdleSeconds()))
+                // ⑥ 业务处理：限大小、分流、落库、回执
                 .addLast(new BusinessHandler(imClient, bizExecutor))
+                // ⑦ 连接生命周期：登记、注销、存活时长统计
                 .addLast(new ConnectionHandler(channelManager));
     }
 
