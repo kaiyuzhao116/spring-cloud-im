@@ -41,9 +41,25 @@ export class ChatSocket {
 
     this.ws.onclose = (event) => {
       this.stopPing()
+
+      // 服务端主动断开：这些情况不重连，交给用户处理
+      // 4001 同账号在别处登录；1009 消息过大；4002 token 过期
+      if (event.code === 4001) {
+        this.onStatus('kicked')
+        return
+      }
+      if (event.code === 1009) {
+        this.onStatus('too-big')
+        return
+      }
+      if (event.code === 4002) {
+        this.onStatus('token-expired')
+        return
+      }
+
       this.onStatus('closed')
-      // 4001 = 被踢下线，不重连
-      if (this.closedByUser || event.code === 4001) return
+      if (this.closedByUser) return
+
       const delay = RECONNECT_DELAYS[Math.min(this.retry, RECONNECT_DELAYS.length - 1)]
       this.retry += 1
       setTimeout(() => this.connect(), delay)

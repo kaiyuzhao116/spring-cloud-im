@@ -16,6 +16,9 @@ public enum CloseReason {
     /** token 已过期，服务端主动断开（下一小步实现） */
     TOKEN_EXPIRED("token_expired"),
 
+    /** 单帧超过业务上限，服务端拒绝并断开 */
+    MESSAGE_TOO_BIG("message_too_big"),
+
     /** handler 里抛了异常 */
     ERROR("error");
 

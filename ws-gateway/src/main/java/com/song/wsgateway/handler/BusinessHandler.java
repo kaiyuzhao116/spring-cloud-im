@@ -5,9 +5,12 @@ import com.song.api.im.dto.SendResultDTO;
 import com.song.wsgateway.protocol.Frame;
 import com.song.wsgateway.protocol.FrameType;
 import com.song.wsgateway.session.ChannelAttrs;
+import com.song.wsgateway.session.CloseReason;
 import com.song.wsgateway.support.ImClient;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +33,9 @@ public class BusinessHandler extends SimpleChannelInboundHandler<TextWebSocketFr
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    /** 单帧业务上限：4KB（协议层上限由 netty.max-frame-length 控制，这里是业务层） */
+    private static final int MAX_TEXT_BYTES = 4096;
+
     private final ImClient imClient;
 
     private final ExecutorService bizExecutor;
@@ -41,6 +47,21 @@ public class BusinessHandler extends SimpleChannelInboundHandler<TextWebSocketFr
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, TextWebSocketFrame frame) {
+
+        // ★ 先看字节数，超了直接断，避免把大字符串解码成 String（那才是真正吃内存的一步）
+        //frame.text()              // 先把字节解码成 String（这一步就吃内存）
+        //frame.content().readableBytes()   // 直接看字节数，不解码
+        int bytes = frame.content().readableBytes();
+        if (bytes > MAX_TEXT_BYTES) {
+            log.warn("帧过大，断开连接 userId={} bytes={}",
+                    ctx.channel().attr(ChannelAttrs.USER_ID).get(), bytes);
+
+            ctx.channel().attr(ChannelAttrs.CLOSE_REASON).set(CloseReason.MESSAGE_TOO_BIG);
+            ctx.writeAndFlush(new CloseWebSocketFrame(1009, "message too big"))
+                    .addListener(ChannelFutureListener.CLOSE);
+            return;      // 不再往下走，不解析、不落库
+        }
+
         Frame in;
         try {
             in = MAPPER.readValue(frame.text(), Frame.class);

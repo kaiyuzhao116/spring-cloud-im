@@ -22,7 +22,17 @@ const statusText = {
   connecting: '连接中…',
   connected: '已连接',
   closed: '已断开',
-  error: '连接失败'
+  error: '连接失败',
+  kicked: '已在其他设备登录',
+  'too-big': '消息过大，已被断开',
+  'token-expired': '登录已过期'
+}
+
+// 服务端主动断开时给用户的明确提示（不再自动重连，需要用户操作）
+const statusError = {
+  kicked: '你的账号已在其他设备登录，当前连接已断开',
+  'too-big': '发送的内容超过 4KB，连接已被服务端断开，请刷新页面重连',
+  'token-expired': '登录已过期，请重新登录'
 }
 
 function resolvePeer(me) {
@@ -71,6 +81,12 @@ function connect() {
     onFrame: handleFrame,
     onStatus: (s) => {
       status.value = s
+      if (statusError[s]) {
+        // 被踢 / 消息过大 / 过期：显示明确原因，且不会自动重连
+        error.value = statusError[s]
+      } else if (s === 'connected') {
+        error.value = ''
+      }
     }
   })
   socket.connect()
@@ -114,7 +130,8 @@ function handleSend() {
   const text = draft.value.trim()
   if (!text) return
   if (status.value !== 'connected') {
-    error.value = '连接未建立，稍后再试'
+    // 保留"被踢/过期/过大"这类具体原因，不要被通用提示覆盖
+    error.value = statusError[status.value] || '连接未建立，稍后再试'
     return
   }
   const cid = socket.sendMessage(peer.value.id, text)
@@ -239,10 +256,13 @@ onBeforeUnmount(() => {
             <input
               v-model="draft"
               type="text"
-              placeholder="输入消息，回车发送"
+              :disabled="status !== 'connected'"
+              :placeholder="status === 'connected' ? '输入消息，回车发送' : '连接已断开，请重新登录'"
               @keyup.enter="handleSend"
             />
-            <button class="primary" type="button" @click="handleSend">发送</button>
+            <button class="primary" type="button" :disabled="status !== 'connected'" @click="handleSend">
+              发送
+            </button>
           </div>
         </footer>
       </section>
