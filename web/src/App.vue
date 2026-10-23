@@ -51,6 +51,17 @@ function scrollToBottom() {
 
 function handleFrame(frame) {
   if (frame.type === 'MSG') {
+    // from=0 是系统消息（欢迎、通知…），居中展示，不属于任何会话
+    if (frame.from === 0) {
+      messages.value.push({
+        key: `sys-${Date.now()}-${messages.value.length}`,
+        system: true,
+        content: frame.content
+      })
+      scrollToBottom()
+      return
+    }
+
     messages.value.push({
       key: `peer-${frame.seq}`,
       mine: false,
@@ -237,7 +248,16 @@ onBeforeUnmount(() => {
         <div ref="listEl" class="messages">
           <p v-if="messages.length === 0" class="empty">还没有消息，说点什么吧</p>
 
-          <div v-for="msg in messages" :key="msg.key" class="row" :class="msg.mine ? 'mine' : 'peer'">
+          <div
+            v-for="msg in messages"
+            :key="msg.key"
+            class="row"
+            :class="msg.system ? 'system' : msg.mine ? 'mine' : 'peer'"
+          >
+            <!-- 系统消息（from=0）：居中的灰字提示，而不是对话气泡 -->
+            <span v-if="msg.system" class="system-tip">{{ msg.content }}</span>
+
+            <template v-else>
             <div class="bubble" :class="{ failed: msg.status === 'failed' }">{{ msg.content }}</div>
             <span class="meta">
               <template v-if="msg.mine">
@@ -247,6 +267,7 @@ onBeforeUnmount(() => {
               </template>
               <template v-else>seq {{ msg.seq }}</template>
             </span>
+            </template>
           </div>
         </div>
 

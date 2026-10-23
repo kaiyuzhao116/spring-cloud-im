@@ -170,7 +170,7 @@ public class BusinessHandler extends SimpleChannelInboundHandler<TextWebSocketFr
         if (!ctx.channel().isActive()) {
             return;
         }
-        try {
+        try {//把 JSON 字符串包成 WebSocket 帧对象。
             ctx.writeAndFlush(new TextWebSocketFrame(MAPPER.writeValueAsString(frame)));
         } catch (Exception e) {
             log.warn("写回帧失败: {}", e.getMessage());

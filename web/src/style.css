@@ -376,6 +376,23 @@ body {
   align-items: flex-start;
 }
 
+/* 系统消息（from=0）：居中灰字，不参与左右对话 */
+.row.system {
+  align-self: center;
+  align-items: center;
+  max-width: 82%;
+}
+
+.system-tip {
+  padding: 4px 12px;
+  border-radius: 10px;
+  background: #f1f4fa;
+  color: #8a94a6;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
+
 .bubble {
   padding: 10px 14px;
   border-radius: 14px;

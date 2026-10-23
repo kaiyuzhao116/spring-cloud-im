@@ -1,10 +1,13 @@
 package com.song.wsgateway.handler;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.song.wsgateway.protocol.Frame;
 import com.song.wsgateway.session.ChannelAttrs;
 import com.song.wsgateway.session.ChannelManager;
 import com.song.wsgateway.session.CloseReason;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.timeout.IdleStateEvent;
 import org.slf4j.Logger;
@@ -28,6 +31,9 @@ import java.util.UUID;
 public class ConnectionHandler extends ChannelInboundHandlerAdapter {
 
     private static final Logger log = LoggerFactory.getLogger(ConnectionHandler.class);
+
+    /** 独立一份即可，ObjectMapper 本身线程安全 */
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final ChannelManager channelManager;
 
@@ -54,6 +60,9 @@ public class ConnectionHandler extends ChannelInboundHandlerAdapter {
             ctx.channel().attr(ChannelAttrs.CONNECT_TIME).set(System.currentTimeMillis());
 
             channelManager.register(connId, ctx.channel());
+
+            // 登记完立刻推一条系统消息，让用户看到"通道已通"
+            sendWelcome(ctx);
 
             Long tokenExp = ctx.channel().attr(ChannelAttrs.TOKEN_EXP).get();
             log.info("token 到期时间 connId={} exp={}", connId,
@@ -99,6 +108,25 @@ public class ConnectionHandler extends ChannelInboundHandlerAdapter {
 
         // 必须继续往后传，否则下游 handler 收不到"连接已关闭"
         super.channelInactive(ctx);
+    }
+
+    /**
+     * 连接建立后主动推一条系统消息。
+     *
+     * <p>字段约定：{@code from=0} 表示系统（user_id 从 1 开始），
+     * {@code seq=0} 表示它不属于任何会话（不需要排序、不落库）。</p>
+     */
+    private void sendWelcome(ChannelHandlerContext ctx) {
+        if (!ctx.channel().isActive()) {
+            return;
+        }
+        Frame welcome = Frame.down(0L, 0L, "欢迎回来，连接已建立");
+        try {
+            ctx.writeAndFlush(new TextWebSocketFrame(MAPPER.writeValueAsString(welcome)));
+        } catch (Exception e) {
+            // 欢迎消息不是关键路径，发不出去也不该影响连接
+            log.warn("欢迎消息发送失败: {}", e.getMessage());
+        }
     }
 
     @Override
