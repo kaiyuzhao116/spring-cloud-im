@@ -42,3 +42,9 @@ npm-debug.log*
 ### Local ###
 *.log
 logs/
+
+### Deploy (构建产物不入库)
+deploy/jars/
+deploy/web/
+deploy/data/
+im-deploy.tar.gz

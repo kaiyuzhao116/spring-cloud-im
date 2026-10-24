@@ -1,4 +1,15 @@
-const WS_URL = 'ws://127.0.0.1:8089/ws'
+/**
+ * WS 地址：
+ * · 开发（vite dev）：直连本地 ws-gateway 8089
+ * · 生产：走同源反代（nginx 把 /ws 转到 8089），这样只需暴露一个端口
+ * · 也可用 VITE_WS_URL 显式指定
+ */
+const WS_URL =
+  import.meta.env.VITE_WS_URL ||
+  (import.meta.env.DEV
+    ? 'ws://127.0.0.1:8089/ws'
+    : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`)
+
 const PING_INTERVAL = 25000
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 10000]
 
