@@ -312,6 +312,59 @@ body {
   background: var(--err);
 }
 
+/* 消息时间分隔 */
+.msg-time {
+  margin: 6px 0 2px;
+  text-align: center;
+  font-size: 11px;
+  color: #a4adbd;
+}
+
+/* 断线/重连横幅 */
+.conn-banner {
+  margin: 0;
+  padding: 6px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: #a16207;
+  background: #fef8e7;
+  border-bottom: 1px solid #f5e6bf;
+}
+
+/* 不在底部时的"新消息"提示 */
+.jump-bottom {
+  position: absolute;
+  right: 20px;
+  bottom: 84px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 14px;
+  background: #3b7cf6;
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(59, 124, 246, 0.32);
+  z-index: 5;
+}
+
+/* 错误提示 + 重新登录按钮 */
+.error-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.error-bar .error {
+  margin: 0;
+}
+
+/* 失败气泡可点击重发 */
+.row.mine .bubble.failed {
+  cursor: pointer;
+}
+
 /* 轻提示（好友申请等） */
 .notice {
   margin: 0 0 8px;
@@ -549,6 +602,8 @@ body {
   min-width: 0;
   /* 关键：flex 子项默认 min-height:auto，内容多了会把 footer 顶出容器 */
   min-height: 0;
+  /* 让"新消息"悬浮按钮以本区域为定位基准 */
+  position: relative;
   background: #fff;
 }
 

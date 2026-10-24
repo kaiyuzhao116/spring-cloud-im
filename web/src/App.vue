@@ -50,6 +50,9 @@ const keyword = ref('')
 const searchResults = ref([])
 const searching = ref(false)
 
+/** 不在底部时收到的新消息条数（点按钮才跳） */
+const unreadNew = ref(0)
+
 /** 轻提示（好友申请等），几秒后自动消失 */
 const notice = ref('')
 let noticeTimer = null
@@ -216,18 +219,81 @@ function scrollToBottom() {
   nextTick(() => {
     if (listEl.value) {
       listEl.value.scrollTop = listEl.value.scrollHeight
+      unreadNew.value = 0
     }
   })
 }
 
-/** 追加一条消息，并裁掉超出上限的最老消息 */
-function pushMessage(item, toBottom = true) {
+/** 是否已经贴着底部（决定要不要自动滚动） */
+function atBottom() {
+  const el = listEl.value
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 60
+}
+
+function jumpToBottom() {
+  scrollToBottom()
+}
+
+/**
+ * 追加一条消息，并裁掉超出上限的最老消息。
+ *
+ * <p>{@code force=true}（自己发的、系统提示）一定滚到底；
+ * 别人发来的消息只有当你本来就在底部时才滚，否则计数等你点。</p>
+ */
+function pushMessage(item, force = false) {
   messages.value.push(item)
   if (messages.value.length > MAX_KEEP) {
     messages.value.splice(0, messages.value.length - MAX_KEEP)
   }
-  if (toBottom) {
+
+  if (force || atBottom()) {
     scrollToBottom()
+  } else {
+    unreadNew.value += 1
+  }
+}
+
+// ==================== 时间显示 ====================
+
+const TIME_GAP_MS = 5 * 60 * 1000
+
+function formatTime(ts) {
+  const d = new Date(ts)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+function formatDay(ts) {
+  const d = new Date(ts)
+  const today = new Date()
+  if (d.toDateString() === today.toDateString()) return '今天'
+
+  const yesterday = new Date(today)
+  yesterday.setDate(today.getDate() - 1)
+  if (d.toDateString() === yesterday.toDateString()) return '昨天'
+
+  return `${d.getMonth() + 1}月${d.getDate()}日`
+}
+
+/** 与上一条间隔超过 5 分钟、或跨天、或是第一条时，才显示时间 */
+function needTimeDivider(index) {
+  const current = messages.value[index]
+  if (!current || !current.ts) return false
+  if (index === 0) return true
+
+  const prev = messages.value[index - 1]
+  if (!prev || !prev.ts) return true
+  return current.ts - prev.ts > TIME_GAP_MS
+}
+
+/** 点击失败的红色气泡：用同一个 cid 重发（服务端幂等，不会重复落库） */
+function resend(msg) {
+  if (msg.status !== 'failed' || !socket || !msg.to) return
+
+  const ok = socket.sendFrame({ type: 'MSG', cid: msg.key, to: msg.to, content: msg.content })
+  if (ok) {
+    msg.status = 'sending'
+    msg.failReason = ''
   }
 }
 
@@ -248,11 +314,15 @@ function handleFrame(frame) {
   if (frame.type === 'MSG') {
     // from=0 是系统消息（欢迎、通知…），居中展示，不属于任何会话
     if (frame.from === 0) {
-      pushMessage({
-        key: `sys-${Date.now()}-${messages.value.length}`,
-        system: true,
-        content: frame.content
-      })
+      pushMessage(
+        {
+          key: `sys-${Date.now()}-${messages.value.length}`,
+          system: true,
+          content: frame.content,
+          ts: Date.now()
+        },
+        true
+      )
       return
     }
 
@@ -266,10 +336,12 @@ function handleFrame(frame) {
       mine: false,
       content: frame.content,
       seq: frame.seq,
+      ts: Date.now(),
+      from: frame.from,
       status: 'received'
     })
 
-    // 同步更新左侧会话卡片
+    // 同步更新左侧会话卡片，并把它置顶（最近有消息的排最前）
     const conv = conversations.value.find((c) => c.peerUid === frame.from)
     if (conv) {
       conv.preview = frame.content
@@ -280,6 +352,12 @@ function handleFrame(frame) {
         reportRead(conversationId(), frame.seq)
       } else {
         conv.unread = (conv.unread || 0) + 1
+      }
+
+      const idx = conversations.value.indexOf(conv)
+      if (idx > 0) {
+        conversations.value.splice(idx, 1)
+        conversations.value.unshift(conv)
       }
     } else {
       loadConversations()   // 新会话（对方第一次发消息给我）
@@ -340,6 +418,8 @@ async function loadHistory() {
       mine: m.from === profile.value.id,
       content: m.content,
       seq: m.seq,
+      ts: m.ts,
+      from: m.from,
       status: 'sent'
     }))
     hasMore.value = data.hasMore
@@ -436,16 +516,15 @@ async function catchUp() {
     if (missed.length === 0) return
 
     missed.forEach((m) => {
-      pushMessage(
-        {
-          key: `h-${m.seq}`,
-          mine: m.from === profile.value.id,
-          content: m.content,
-          seq: m.seq,
-          status: 'sent'
-        },
-        false
-      )
+      pushMessage({
+        key: `h-${m.seq}`,
+        mine: m.from === profile.value.id,
+        content: m.content,
+        seq: m.seq,
+        ts: m.ts,
+        from: m.from,
+        status: 'sent'
+      })
     })
     scrollToBottom()
     console.info(`重连补到 ${missed.length} 条漏掉的消息`)
@@ -537,7 +616,18 @@ function handleSend() {
     error.value = '发送失败，连接已断开'
     return
   }
-  pushMessage({ key: cid, mine: true, content: text, seq: null, status: 'sending' })
+  pushMessage(
+    {
+      key: cid,
+      mine: true,
+      content: text,
+      seq: null,
+      ts: Date.now(),
+      to: peer.value.id,
+      status: 'sending'
+    },
+    true
+  )
   draft.value = ''
   error.value = ''
 
@@ -755,6 +845,11 @@ onBeforeUnmount(() => {
           </div>
         </header>
 
+        <!-- 断线/重连提示：比顶部的小圆点更显眼 -->
+        <p v-if="status === 'closed' || status === 'connecting'" class="conn-banner">
+          连接已断开，正在尝试重连…
+        </p>
+
         <div ref="listEl" class="messages" @scroll="handleScroll">
           <!-- 顶部：可点击加载更早，避免"上滑"这个交互太隐蔽；内容不满一屏时也能用 -->
           <button
@@ -770,34 +865,59 @@ onBeforeUnmount(() => {
 
           <p v-if="messages.length === 0" class="empty">还没有消息，说点什么吧</p>
 
-          <div
-            v-for="msg in messages"
-            :key="msg.key"
-            class="row"
-            :class="msg.system ? 'system' : msg.mine ? 'mine' : 'peer'"
-          >
-            <!-- 系统消息（from=0）：居中的灰字提示，而不是对话气泡 -->
-            <span v-if="msg.system" class="system-tip">{{ msg.content }}</span>
+          <template v-for="(msg, index) in messages" :key="msg.key">
+            <!-- 时间分隔：第一条、跨天、或间隔超过 5 分钟才显示 -->
+            <p v-if="needTimeDivider(index)" class="msg-time">
+              {{ formatDay(msg.ts) }} {{ formatTime(msg.ts) }}
+            </p>
 
-            <template v-else>
-            <div class="bubble" :class="{ failed: msg.status === 'failed' }">{{ msg.content }}</div>
-            <span class="meta">
-              <template v-if="msg.mine">
-                <span v-if="msg.status === 'sending'">发送中…</span>
-                <span v-else-if="msg.status === 'failed'" class="failed-text">
-                  {{ msg.failReason || '发送失败，请重发' }}
+            <div class="row" :class="msg.system ? 'system' : msg.mine ? 'mine' : 'peer'">
+              <!-- 系统消息（from=0）：居中的灰字提示，而不是对话气泡 -->
+              <span v-if="msg.system" class="system-tip">{{ msg.content }}</span>
+
+              <template v-else>
+                <div
+                  class="bubble"
+                  :class="{ failed: msg.status === 'failed' }"
+                  :title="msg.status === 'failed' ? '点击重发' : ''"
+                  @click="resend(msg)"
+                >
+                  {{ msg.content }}
+                </div>
+                <span class="meta">
+                  <template v-if="msg.mine">
+                    <span v-if="msg.status === 'sending'">发送中…</span>
+                    <span v-else-if="msg.status === 'failed'" class="failed-text">
+                      {{ msg.failReason || '发送失败，点击气泡重发' }}
+                    </span>
+                    <span v-else>seq {{ msg.seq }}</span>
+                  </template>
+                  <template v-else>seq {{ msg.seq }}</template>
                 </span>
-                <span v-else>seq {{ msg.seq }}</span>
               </template>
-              <template v-else>seq {{ msg.seq }}</template>
-            </span>
-            </template>
-          </div>
+            </div>
+          </template>
         </div>
+
+        <!-- 不在底部时，新消息不抢滚动，只提示条数 -->
+        <button v-if="unreadNew > 0" type="button" class="jump-bottom" @click="jumpToBottom">
+          ↓ {{ unreadNew }} 条新消息
+        </button>
 
         <footer class="composer">
           <p v-if="notice" class="notice">{{ notice }}</p>
-          <p v-if="error" class="error">{{ error }}</p>
+          <div v-if="error" class="error-bar">
+            <span class="error">{{ error }}</span>
+            <!-- 被踢 / 过期后给出明确出口，否则只能手动刷新 -->
+            <button
+              v-if="status === 'kicked' || status === 'token-expired'"
+              type="button"
+              class="mini primary-mini"
+              @click="handleLogout"
+            >
+              重新登录
+            </button>
+          </div>
           <div class="composer-row">
             <input
               v-model="draft"
