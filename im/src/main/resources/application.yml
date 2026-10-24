@@ -56,6 +56,14 @@ dubbo:
     check: false
     timeout: 3000
 
+# Outbox 投递器
+im:
+  outbox:
+    # 定时扫表的间隔（毫秒）。
+    # 主路径是"事务提交后立即唤醒"，扫表只在唤醒丢失、进程重启、MQ 恢复重试时兜底，
+    # 所以这里可以放宽到 5 秒 —— 数据库开销降到 1/5，正常发消息的延迟不受影响。
+    interval-ms: 5000
+
 ---
 # 没有启动 Nacos 时的本地模式：--spring.profiles.active=local
 spring:
