@@ -23,6 +23,9 @@ public class UserDTO implements Serializable {
 
     private String nickname;
 
+    /** user / admin（管理员才能调后台接口） */
+    private String role;
+
     private String avatar;
 
     /**

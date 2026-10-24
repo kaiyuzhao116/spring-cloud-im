@@ -8,6 +8,7 @@ import com.song.wsgateway.session.ChannelManager;
 import com.song.wsgateway.session.OnlineRegistry;
 import com.song.wsgateway.support.ImClient;
 import com.song.wsgateway.support.JwtVerifier;
+import com.song.wsgateway.support.KickedChecker;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
@@ -57,6 +58,8 @@ public class NettyServer implements SmartLifecycle {
 
     private final KickPublisher kickPublisher;
 
+    private final KickedChecker kickedChecker;
+
     private EventLoopGroup bossGroup;
 
     private EventLoopGroup workerGroup;
@@ -67,7 +70,8 @@ public class NettyServer implements SmartLifecycle {
 
     public NettyServer(NettyProperties properties, JwtVerifier jwtVerifier, ChannelManager channelManager,
                        ImClient imClient, @Qualifier("bizExecutor") ExecutorService bizExecutor,
-                       OnlineRegistry onlineRegistry, KickPublisher kickPublisher) {
+                       OnlineRegistry onlineRegistry, KickPublisher kickPublisher,
+                       KickedChecker kickedChecker) {
         this.properties = properties;
         this.jwtVerifier = jwtVerifier;
         this.channelManager = channelManager;
@@ -75,6 +79,7 @@ public class NettyServer implements SmartLifecycle {
         this.bizExecutor = bizExecutor;
         this.onlineRegistry = onlineRegistry;
         this.kickPublisher = kickPublisher;
+        this.kickedChecker = kickedChecker;
     }
 
     @Override
@@ -130,7 +135,7 @@ public class NettyServer implements SmartLifecycle {
                 //    下一步的验签只认完整请求
                 .addLast(new HttpObjectAggregator(properties.getMaxFrameLength()))
                 // ③ 鉴权：从 query/header 取 token 验签，通过后把 userId、tokenExp 写入 Channel
-                .addLast(new AuthHandshakeHandler(jwtVerifier))
+                .addLast(new AuthHandshakeHandler(jwtVerifier, kickedChecker))
                 // ④ 协议升级：识别 /ws（允许带 query）→ 回 101 → 换成帧编解码；
                 //    之后流动的是 WebSocketFrame，并自动处理 Close / Ping / Pong
                 .addLast(new WebSocketServerProtocolHandler(wsConfig))

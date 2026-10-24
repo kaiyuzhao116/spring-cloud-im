@@ -51,6 +51,13 @@ spring:
             - Path=/api/account/**
           filters:
             - StripPrefix=2
+        # 后台管理：/api/admin/users → user 服务的 /admin/users
+        - id: admin
+          uri: lb://user
+          predicates:
+            - Path=/api/admin/**
+          filters:
+            - StripPrefix=1
 
 # 网关鉴权配置：secret 必须与 auth 服务一致（生产环境改 RS256 公钥）
 gateway:

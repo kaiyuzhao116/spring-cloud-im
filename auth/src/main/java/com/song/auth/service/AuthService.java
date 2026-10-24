@@ -116,6 +116,22 @@ public class AuthService {
                 jwtManager.getExpireSeconds(), deviceType);
     }
 
+    /**
+     * 管理员重置他人密码。
+     *
+     * <p>哈希由本服务生成（唯一持有密码策略的地方），user 服务只落库。</p>
+     */
+    public void resetPassword(long operatorUid, long targetUid, String newPassword) {
+        UserDTO operator = userFacade.getById(operatorUid);
+        if (operator == null || !"admin".equalsIgnoreCase(operator.getRole())) {
+            throw new BizException(ResultCode.FORBIDDEN.getCode(), "需要管理员权限");
+        }
+        validatePassword(newPassword);
+
+        userFacade.updatePassword(targetUid, passwordEncoder.encode(newPassword));
+        log.info("管理员重置密码 operator={} target={}", operatorUid, targetUid);
+    }
+
     /** 账号统一小写，避免 Admin / admin 变两个账号 */
     private String normalizeAccount(String raw) {
         String account = raw == null ? "" : raw.trim().toLowerCase();

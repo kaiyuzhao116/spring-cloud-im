@@ -2,6 +2,7 @@ package com.song.wsgateway.handler;
 
 import com.song.wsgateway.session.ChannelAttrs;
 import com.song.wsgateway.support.JwtVerifier;
+import com.song.wsgateway.support.KickedChecker;
 import com.song.wsgateway.support.TokenExtractor;
 import io.jsonwebtoken.Claims;
 import io.netty.buffer.Unpooled;
@@ -37,8 +38,11 @@ public class AuthHandshakeHandler extends ChannelInboundHandlerAdapter {
 
     private final JwtVerifier jwtVerifier;
 
-    public AuthHandshakeHandler(JwtVerifier jwtVerifier) {
+    private final KickedChecker kickedChecker;
+
+    public AuthHandshakeHandler(JwtVerifier jwtVerifier, KickedChecker kickedChecker) {
         this.jwtVerifier = jwtVerifier;
+        this.kickedChecker = kickedChecker;
     }
 
     @Override
@@ -70,6 +74,15 @@ public class AuthHandshakeHandler extends ChannelInboundHandlerAdapter {
         }
 
         Long userId = Long.valueOf(claims.getSubject());
+
+        // 管理员踢人会作废"签发时间早于踢出时刻"的 token；
+        // 这一步必须有，否则用户刷新页面（直连 8089，不经过网关）就能复活
+        if (kickedChecker.isRevoked(userId, claims.getIssuedAt())) {
+            log.info("握手拒绝：token 已作废 userId={}", userId);
+            reject(ctx, request, HttpResponseStatus.UNAUTHORIZED, 401, "登录状态已失效，请重新登录");
+            return;
+        }
+
         ctx.channel().attr(ChannelAttrs.USER_ID).set(userId);
         ctx.channel().attr(ChannelAttrs.TOKEN_EXP).set(claims.getExpiration().getTime());
         // 日志只打路径，绝不打 uri（query 里可能带 token，落日志等于泄露凭证）

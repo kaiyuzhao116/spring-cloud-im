@@ -3,6 +3,11 @@ import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   acceptFriendRequest,
   clearSession,
+  fetchAdminUsers,
+  fetchOnline,
+  kickUser,
+  resetUserPassword,
+  updateUserStatus,
   fetchConversations,
   fetchFriendRequests,
   fetchFriends,
@@ -52,6 +57,12 @@ const searching = ref(false)
 
 /** 不在底部时收到的新消息条数（点按钮才跳） */
 const unreadNew = ref(0)
+
+/** 后台管理面板 */
+const showAdmin = ref(false)
+const adminUsers = ref([])
+const adminKeyword = ref('')
+const adminLoading = ref(false)
 
 /** 好友在线状态的定时刷新 */
 let presenceTimer = null
@@ -232,6 +243,70 @@ function openAddFriend() {
   showAddFriend.value = true
   keyword.value = ''
   searchResults.value = []
+}
+
+// ==================== 后台管理 ====================
+
+function isAdmin() {
+  return profile.value && profile.value.role === 'admin'
+}
+
+async function openAdmin() {
+  if (!isAdmin()) return
+  showAdmin.value = true
+  await loadAdminUsers()
+}
+
+async function loadAdminUsers() {
+  adminLoading.value = true
+  try {
+    const users = await fetchAdminUsers(adminKeyword.value.trim())
+    const online = users.length > 0 ? await fetchOnline(users.map((u) => u.id)) : []
+    const onlineMap = new Map(online.map((o) => [o.uid, o.online]))
+    adminUsers.value = users.map((u) => ({ ...u, online: onlineMap.get(u.id) === true }))
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    adminLoading.value = false
+  }
+}
+
+/** 启用 / 禁用（后台的"删除"用禁用实现，避免历史消息出现孤儿 uid） */
+async function toggleUserStatus(u) {
+  const next = u.status === 1 ? 0 : 1
+  if (next === 0 && !window.confirm(`确定禁用「${u.nickname}」？禁用后无法登录`)) {
+    return
+  }
+  try {
+    await updateUserStatus(u.id, next)
+    u.status = next
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function kickOffline(u) {
+  if (!window.confirm(`确定把「${u.nickname}」踢下线？`)) {
+    return
+  }
+  try {
+    await kickUser(u.id)
+    u.online = false
+    showNotice(`「${u.nickname}」已被强制下线`)
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function resetPasswordOf(u) {
+  const pwd = window.prompt(`给「${u.nickname}」设置新密码（8~20 位，含字母和数字）`)
+  if (!pwd) return
+  try {
+    await resetUserPassword(u.id, pwd)
+    showNotice(`已重置「${u.nickname}」的密码`)
+  } catch (e) {
+    error.value = e.message
+  }
 }
 
 /** 连接建立/重连时刷新一次好友与申请（实时通知之外的兜底） */
@@ -890,6 +965,9 @@ onBeforeUnmount(() => {
           <p v-if="friends.length === 0" class="contact-empty">还没有好友（注册后会自动加管理员）</p>
         </div>
 
+        <button v-if="isAdmin()" class="ghost admin-entry" type="button" @click="openAdmin">
+          管理后台
+        </button>
         <button class="ghost logout" type="button" @click="handleLogout">退出登录</button>
       </aside>
 
@@ -933,6 +1011,58 @@ onBeforeUnmount(() => {
             <p v-if="searchResults.length === 0" class="contact-empty">
               只能按完整账号精确查找，搜不到就是没有这个人
             </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 后台管理面板（仅管理员可见） -->
+      <div v-if="showAdmin" class="modal-mask" @click.self="showAdmin = false">
+        <div class="modal admin-modal">
+          <header class="modal-header">
+            <strong>用户管理</strong>
+            <button type="button" class="mini" @click="showAdmin = false">关闭</button>
+          </header>
+
+          <div class="modal-search">
+            <input
+              v-model="adminKeyword"
+              type="text"
+              placeholder="账号或昵称关键词"
+              @keyup.enter="loadAdminUsers"
+            />
+            <button type="button" class="primary" :disabled="adminLoading" @click="loadAdminUsers">
+              {{ adminLoading ? '加载中…' : '查询' }}
+            </button>
+          </div>
+
+          <div class="admin-table">
+            <div class="admin-row admin-head">
+              <span>用户</span>
+              <span>角色</span>
+              <span>状态</span>
+              <span>操作</span>
+            </div>
+
+            <div v-for="u in adminUsers" :key="u.id" class="admin-row">
+              <div class="admin-user">
+                <strong>{{ u.nickname }}</strong>
+                <span>@{{ u.account }} · uid {{ u.id }}</span>
+                <span class="presence" :class="{ on: u.online }" :title="u.online ? '在线' : '离线'"></span>
+              </div>
+              <span class="admin-role">{{ u.role === 'admin' ? '管理员' : '普通用户' }}</span>
+              <span :class="u.status === 1 ? 'state-ok' : 'state-off'">
+                {{ u.status === 1 ? '正常' : '已禁用' }}
+              </span>
+              <div class="admin-actions">
+                <button type="button" class="mini" :disabled="!u.online" @click="kickOffline(u)">踢下线</button>
+                <button type="button" class="mini" @click="toggleUserStatus(u)">
+                  {{ u.status === 1 ? '禁用' : '启用' }}
+                </button>
+                <button type="button" class="mini" @click="resetPasswordOf(u)">改密码</button>
+              </div>
+            </div>
+
+            <p v-if="adminUsers.length === 0" class="contact-empty">没有匹配的用户</p>
           </div>
         </div>
       </div>

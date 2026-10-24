@@ -55,6 +55,34 @@ export function fetchFriends() {
   return request('/api/im/friends')
 }
 
+// ==================== 后台管理（仅 admin） ====================
+
+/** 用户列表（可按账号/昵称模糊搜索） */
+export function fetchAdminUsers(keyword = '') {
+  const qs = new URLSearchParams({ keyword, limit: '100' })
+  return request(`/api/admin/users?${qs.toString()}`)
+}
+
+/** 启用 / 禁用（后台的"删除"用禁用实现） */
+export function updateUserStatus(id, status) {
+  return request(`/api/admin/users/${id}/status`, { method: 'POST', body: { status } })
+}
+
+/** 重置密码 */
+export function resetUserPassword(id, password) {
+  return request(`/api/auth/admin/users/${id}/password`, { method: 'POST', body: { password } })
+}
+
+/** 批量查在线状态 */
+export function fetchOnline(uids) {
+  return request(`/api/im/online?uids=${uids.join(',')}`)
+}
+
+/** 强制下线 */
+export function kickUser(uid) {
+  return request(`/api/im/admin/kick/${uid}`, { method: 'POST' })
+}
+
 /** 搜索用户（按账号/昵称前缀） */
 export function searchUsers(keyword) {
   const qs = new URLSearchParams({ keyword })

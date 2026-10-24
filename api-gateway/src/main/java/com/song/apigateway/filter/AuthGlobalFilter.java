@@ -2,6 +2,7 @@ package com.song.apigateway.filter;
 
 import com.song.apigateway.config.AuthProperties;
 import com.song.apigateway.support.JwtVerifier;
+import com.song.apigateway.support.KickedChecker;
 import io.jsonwebtoken.Claims;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,9 +41,13 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
 
     private final JwtVerifier jwtVerifier;
 
-    public AuthGlobalFilter(AuthProperties authProperties, JwtVerifier jwtVerifier) {
+    private final KickedChecker kickedChecker;
+
+    public AuthGlobalFilter(AuthProperties authProperties, JwtVerifier jwtVerifier,
+                            KickedChecker kickedChecker) {
         this.authProperties = authProperties;
         this.jwtVerifier = jwtVerifier;
+        this.kickedChecker = kickedChecker;
     }
 
     @Override
@@ -70,6 +75,18 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
             return unauthorized(exchange, "登录已失效，请重新登录");
         }
 
+        // 管理员踢人会作废"签发时间早于踢出时刻"的 token —— 否则刷新一下又活了
+        long issuedAt = claims.getIssuedAt() == null ? 0L : claims.getIssuedAt().getTime();
+
+        return kickedChecker.isRevoked(userId, issuedAt).flatMap(revoked -> {
+            if (revoked) {
+                return unauthorized(exchange, "登录状态已失效，请重新登录");
+            }
+            return chain.filter(withUserId(exchange, userId));
+        });
+    }
+
+    private ServerWebExchange withUserId(ServerWebExchange exchange, String userId) {
         ServerHttpRequest request = exchange.getRequest().mutate()
                 .headers(headers -> {
                     // 先剥离外部伪造的身份头，再写入可信值
@@ -77,7 +94,7 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
                     headers.set(HEADER_USER_ID, userId);
                 })
                 .build();
-        return chain.filter(exchange.mutate().request(request).build());
+        return exchange.mutate().request(request).build();
     }
 
     private boolean isWhiteList(String path) {

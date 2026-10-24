@@ -25,4 +25,11 @@ public interface UserFacade {
      * 批量查询（好友列表、会话列表展示昵称用，避免 N+1 次 RPC）。
      */
     java.util.List<UserDTO> getByIds(java.util.List<Long> userIds);
+
+    /**
+     * 直接更新密码哈希（管理员重置密码用）。
+     *
+     * <p>哈希由 auth 负责生成，user 服务只落库，不接触明文。</p>
+     */
+    void updatePassword(Long userId, String passwordHash);
 }

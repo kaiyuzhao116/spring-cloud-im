@@ -4,9 +4,12 @@ import com.song.auth.domain.LoginRequest;
 import com.song.auth.domain.LoginResponse;
 import com.song.auth.domain.RegisterRequest;
 import com.song.auth.service.AuthService;
+import com.song.common.BizException;
 import com.song.common.Result;
+import com.song.common.ResultCode;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
@@ -37,6 +40,37 @@ public class AuthController {
     @PostMapping("/register")
     public Result<LoginResponse> register(@RequestBody RegisterRequest request, HttpServletRequest httpRequest) {
         return Result.ok(authService.register(request, clientIp(httpRequest), httpRequest.getHeader("User-Agent")));
+    }
+
+    /**
+     * 管理员重置他人密码。
+     *
+     * <p>经网关：{@code POST /api/auth/admin/users/{id}/password}</p>
+     */
+    @PostMapping("/admin/users/{id}/password")
+    public Result<Void> resetPassword(@PathVariable("id") Long id,
+                                      @RequestBody ResetPasswordRequest request,
+                                      jakarta.servlet.http.HttpServletRequest httpRequest) {
+        Long operatorUid = resolveUserId(httpRequest.getHeader("X-User-Id"));
+        if (operatorUid == null) {
+            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "缺少身份信息，请通过网关访问");
+        }
+        authService.resetPassword(operatorUid, id, request.password());
+        return Result.ok(null);
+    }
+
+    private Long resolveUserId(String header) {
+        if (header == null || header.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(header.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    public record ResetPasswordRequest(String password) {
     }
 
     /**

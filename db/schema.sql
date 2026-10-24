@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS `sys_user`
     `account`       VARCHAR(64)     NOT NULL COMMENT '登录账号',
     `password_hash` VARCHAR(100)    NOT NULL COMMENT 'BCrypt 密码哈希',
     `nickname`      VARCHAR(64)     NOT NULL DEFAULT '' COMMENT '昵称',
+    `role`          VARCHAR(16)     NOT NULL DEFAULT 'user' COMMENT 'user/admin，后台接口按此校验',
     `avatar`        VARCHAR(255)             DEFAULT NULL COMMENT '头像地址',
     `status`        TINYINT         NOT NULL DEFAULT 1 COMMENT '1正常 0禁用',
     `created_at`    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',

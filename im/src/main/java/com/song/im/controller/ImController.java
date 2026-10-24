@@ -7,6 +7,10 @@ import com.song.common.ResultCode;
 import com.song.common.UserContext;
 import com.song.im.friend.FriendRequestService;
 import com.song.im.friend.FriendService;
+import com.song.im.mq.AdminKickPublisher;
+import com.song.im.support.AdminGuard;
+import com.song.im.support.KickRegistry;
+import com.song.im.support.OnlineQuery;
 import com.song.im.domain.ConversationItem;
 import com.song.im.domain.FriendRequestItem;
 import com.song.im.domain.PullResult;
@@ -42,11 +46,25 @@ public class ImController {
 
     private final FriendRequestService friendRequestService;
 
+    private final OnlineQuery onlineQuery;
+
+    private final AdminGuard adminGuard;
+
+    private final AdminKickPublisher adminKickPublisher;
+
+    private final KickRegistry kickRegistry;
+
     public ImController(MessageService messageService, FriendService friendService,
-                        FriendRequestService friendRequestService) {
+                        FriendRequestService friendRequestService, OnlineQuery onlineQuery,
+                        AdminGuard adminGuard, AdminKickPublisher adminKickPublisher,
+                        KickRegistry kickRegistry) {
         this.messageService = messageService;
         this.friendService = friendService;
         this.friendRequestService = friendRequestService;
+        this.onlineQuery = onlineQuery;
+        this.adminGuard = adminGuard;
+        this.adminKickPublisher = adminKickPublisher;
+        this.kickRegistry = kickRegistry;
     }
 
     /**
@@ -102,6 +120,72 @@ public class ImController {
 
     /** 好友申请请求体 */
     public record FriendRequestCommand(long toUid, String message) {
+    }
+
+    /**
+     * 批量查在线状态（后台用）。
+     *
+     * <p>经网关：{@code GET /api/im/online?uids=1,2,3}</p>
+     */
+    @GetMapping("/online")
+    public Result<List<OnlineVO>> online(@RequestParam("uids") String uids,
+                                         @RequestHeader(value = "X-User-Id", required = false) String userIdHeader) {
+        Long userId = resolveUserId(userIdHeader);
+        if (userId == null) {
+            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "缺少身份信息，请通过网关访问");
+        }
+        adminGuard.requireAdmin(userId);
+
+        List<Long> ids = new java.util.ArrayList<>();
+        for (String part : uids.split(",")) {
+            String trimmed = part.trim();
+            if (!trimmed.isEmpty()) {
+                try {
+                    ids.add(Long.parseLong(trimmed));
+                } catch (NumberFormatException ignored) {
+                    // 忽略非法 id
+                }
+            }
+        }
+        if (ids.isEmpty()) {
+            return Result.ok(List.of());
+        }
+
+        java.util.Set<Long> onlineSet = onlineQuery.onlineAmong(ids);
+        List<OnlineVO> result = ids.stream()
+                .map(id -> new OnlineVO(id, onlineSet.contains(id)))
+                .toList();
+        return Result.ok(result);
+    }
+
+    /**
+     * 管理员强制下线：踢掉该用户的所有连接。
+     *
+     * <p>经网关：{@code POST /api/im/admin/kick/{uid}}</p>
+     */
+    @PostMapping("/admin/kick/{uid}")
+    public Result<Void> kick(@PathVariable("uid") long targetUid,
+                             @RequestHeader(value = "X-User-Id", required = false) String userIdHeader) {
+        Long userId = resolveUserId(userIdHeader);
+        if (userId == null) {
+            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "缺少身份信息，请通过网关访问");
+        }
+        adminGuard.requireAdmin(userId);
+        if (userId == targetUid) {
+            throw new BizException(ResultCode.BAD_REQUEST.getCode(), "不能踢自己");
+        }
+
+        // ① 让旧 token 作废（否则对方刷新一下又连上了）
+        kickRegistry.markKicked(targetUid);
+        // ② 断开当前连接
+        adminKickPublisher.kickAll(targetUid);
+
+        log.info("管理员踢人 operator={} target={}", userId, targetUid);
+        return Result.ok(null);
+    }
+
+    /** 在线状态返回项 */
+    public record OnlineVO(long uid, boolean online) {
     }
 
     /**

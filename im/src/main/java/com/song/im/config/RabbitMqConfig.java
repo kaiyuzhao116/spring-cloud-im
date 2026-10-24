@@ -21,6 +21,9 @@ public class RabbitMqConfig {
 
     public static final String ROUTING_KEY_NOTIFY = "ws.notify";
 
+    /** 踢人事件（单端登录 / 管理员强制下线），由 ws-gateway 消费 */
+    public static final String ROUTING_KEY_KICK = "ws.kick";
+
     @Bean
     public TopicExchange imEventsExchange() {
         return new TopicExchange(EXCHANGE, true, false);

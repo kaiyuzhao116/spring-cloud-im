@@ -37,7 +37,7 @@ public class UserController {
         UserDTO user = userRepository.findById(userId)
                 .orElseThrow(() -> new BizException(ResultCode.NOT_FOUND.getCode(), "用户不存在"));
         return Result.ok(new UserProfileVO(user.getId(), user.getAccount(), user.getNickname(),
-                user.getAvatar(), user.getStatus(), user.getCreatedAt()));
+                user.getRole(), user.getAvatar(), user.getStatus(), user.getCreatedAt()));
     }
 
     /**
@@ -66,7 +66,7 @@ public class UserController {
     /**
      * 对外视图，绝不包含 passwordHash。
      */
-    public record UserProfileVO(Long id, String account, String nickname, String avatar,
+    public record UserProfileVO(Long id, String account, String nickname, String role, String avatar,
                                 Integer status, Long createdAt) {
     }
 

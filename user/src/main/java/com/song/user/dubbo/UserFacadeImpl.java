@@ -57,4 +57,14 @@ public class UserFacadeImpl implements UserFacade {
         return userRepository.findByIds(userIds);
     }
 
+    @Override
+    public void updatePassword(Long userId, String passwordHash) {
+        if (userId == null || userId <= 0) {
+            throw new BizException(ResultCode.BAD_REQUEST.getCode(), "用户不存在");
+        }
+        if (userRepository.updatePasswordHash(userId, passwordHash) == 0) {
+            throw new BizException(ResultCode.NOT_FOUND.getCode(), "用户不存在");
+        }
+    }
+
 }
