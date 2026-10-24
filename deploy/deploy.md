@@ -51,7 +51,12 @@ docker compose down && docker compose up -d   # 全量重启（数据在 MySQL�
 cd web && npm run build
 scp -r dist/index.html dist/assets root@82.157.185.69:/opt/im/web/
 
+# ⚠️ 必须修权限：scp 建出来的目录可能是 700，
+#    nginx worker（nginx 用户）读不到 → 静态资源 403 → 页面全白
+ssh root@82.157.185.69 "chmod -R 755 /opt/im/web && chmod 644 /opt/im/web/index.html /opt/im/web/assets/*"
+
 # 服务器上不用重启容器，nginx 直接读文件
+# 浏览器记得 Ctrl+F5 强刷（旧 403 可能被缓存）
 ```
 
 ### 更新后端（改了 jar 时）
