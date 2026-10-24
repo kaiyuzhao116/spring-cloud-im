@@ -30,15 +30,16 @@ public final class ChannelAttrs {
     public static final AttributeKey<Long> CONNECT_TIME = AttributeKey.valueOf("connectTime");
 
     /**
-     * 每条连接已推送到的 seq：{@code fromUid -> 该会话最大已推 seq}。
+     * 每条连接最近推送过的 seq：{@code fromUid -> 最近 N 个 seq 的窗口}。
      *
-     * <p>用来吸收 Outbox "至少一次"投递带来的重复：同一条消息推两次时，
-     * 第二次的 seq 不会大于已推值，直接跳过。</p>
+     * <p>刻意<b>只做"完全相等"判重</b>，不做大小比较：Outbox 是至少一次投递，
+     * 并发抢占与失败重试都会让消息乱序到达，用"最大 seq"当水位线会把
+     * 晚到的小 seq 误判成重复而丢弃。</p>
      *
      * <p>单聊里 {@code fromUid} 唯一确定一个会话，所以不需要再做会话 ID 拼接。</p>
      */
-    public static final AttributeKey<java.util.Map<Long, Long>> PUSHED_SEQ =
-            AttributeKey.valueOf("pushedSeq");
+    public static final AttributeKey<java.util.Map<Long, java.util.Deque<Long>>> RECENT_SEQ =
+            AttributeKey.valueOf("recentSeq");
 
     private ChannelAttrs() {
     }

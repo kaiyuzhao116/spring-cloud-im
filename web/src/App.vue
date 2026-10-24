@@ -552,7 +552,7 @@ function handleFrame(frame) {
       return
     }
 
-    pushMessage({
+    const incoming = {
       key: `peer-${frame.seq}`,
       mine: false,
       content: frame.content,
@@ -560,7 +560,18 @@ function handleFrame(frame) {
       ts: Date.now(),
       from: frame.from,
       status: 'received'
-    })
+    }
+
+    // Outbox 是"至少一次"投递，消息可能乱序到达：
+    // 按 seq 插到正确位置，否则 26 会显示在 25 前面
+    const pos = messages.value.findIndex(
+      (m) => typeof m.seq === 'number' && m.seq > frame.seq
+    )
+    if (pos === -1) {
+      pushMessage(incoming)
+    } else {
+      messages.value.splice(pos, 0, incoming)
+    }
 
     // 同步更新左侧会话卡片，并把它置顶（最近有消息的排最前）
     const conv = conversations.value.find((c) => c.peerUid === frame.from)

@@ -10,8 +10,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,8 +36,16 @@ public class ChannelManager {
     /** WebSocket 关闭码：同账号在别处登录（客户端据此判断"不要重连"） */
     private static final int CLOSE_KICKED = 4001;
 
-    /** 每条连接最多记录多少个会话的已推 seq（LRU 淘汰） */
+    /** 每条连接最多记录多少个会话（LRU 淘汰） */
     private static final int MAX_TRACKED_CONVS = 500;
+
+    /**
+     * 每个会话保留最近多少个已推 seq 用于判重。
+     *
+     * <p>MQ 重投的窗口是秒级，同一会话几秒内不会有 32 条重复；
+     * 窗口外的极小概率放行由前端按 seq 精确匹配兜住。</p>
+     */
+    private static final int RECENT_SEQ_WINDOW = 32;
 
     private final Map<String, Channel> channels = new ConcurrentHashMap<>();
 
@@ -156,36 +166,43 @@ public class ChannelManager {
                 continue;
             }
 
-            Map<Long, Long> pushedSeq = pushedSeqOf(channel);
-            synchronized (pushedSeq) {
-                Long last = pushedSeq.get(fromUid);
-                if (last != null && seq <= last) {
-                    log.debug("跳过重复推送 to={} from={} seq={} 已推={}", toUid, fromUid, seq, last);
+            Map<Long, Deque<Long>> recentSeq = recentSeqOf(channel);
+            synchronized (recentSeq) {
+                Deque<Long> window = recentSeq.computeIfAbsent(fromUid,
+                        k -> new ArrayDeque<>(RECENT_SEQ_WINDOW));
+
+                // 只挡"完全相同"的重复；seq 比窗口内的小也照推，乱序到达不能误杀
+                if (window.contains(seq)) {
+                    log.debug("跳过重复推送 to={} from={} seq={}", toUid, fromUid, seq);
                     continue;
                 }
+
                 channel.writeAndFlush(new TextWebSocketFrame(json));
-                pushedSeq.put(fromUid, seq);
+                window.addLast(seq);
+                if (window.size() > RECENT_SEQ_WINDOW) {
+                    window.removeFirst();
+                }
                 pushed++;
             }
         }
         return pushed;
     }
 
-    /** 每条连接一份"已推 seq"，用 LRU 限制条目数，防止会话多了内存无界 */
-    private Map<Long, Long> pushedSeqOf(Channel channel) {
-        Map<Long, Long> map = channel.attr(ChannelAttrs.PUSHED_SEQ).get();
+    /** 每条连接一份"最近推过的 seq"，会话维度用 LRU 限制，防止内存无界 */
+    private Map<Long, Deque<Long>> recentSeqOf(Channel channel) {
+        Map<Long, Deque<Long>> map = channel.attr(ChannelAttrs.RECENT_SEQ).get();
         if (map != null) {
             return map;
         }
 
-        Map<Long, Long> created = Collections.synchronizedMap(
+        Map<Long, Deque<Long>> created = Collections.synchronizedMap(
                 new LinkedHashMap<>(16, 0.75f, true) {
                     @Override
-                    protected boolean removeEldestEntry(Map.Entry<Long, Long> eldest) {
+                    protected boolean removeEldestEntry(Map.Entry<Long, Deque<Long>> eldest) {
                         return size() > MAX_TRACKED_CONVS;
                     }
                 });
-        Map<Long, Long> existing = channel.attr(ChannelAttrs.PUSHED_SEQ).setIfAbsent(created);
+        Map<Long, Deque<Long>> existing = channel.attr(ChannelAttrs.RECENT_SEQ).setIfAbsent(created);
         return existing != null ? existing : created;
     }
 
