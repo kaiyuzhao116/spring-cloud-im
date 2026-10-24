@@ -5,7 +5,9 @@ spring:
   application:
     name: im
   datasource:
-    url: jdbc:mysql://127.0.0.1:3306/spring_cloud?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    # forceConnectionTimeZoneToSession=true：建连时执行 SET time_zone='+08:00'，
+    # 否则 NOW()/CURRENT_TIMESTAMP 会用服务器的 UTC，落库时间比实际早 8 小时
+    url: jdbc:mysql://127.0.0.1:3306/spring_cloud?useUnicode=true&characterEncoding=utf8&connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true&useSSL=false&allowPublicKeyRetrieval=true
     username: root
     password: 123456
     driver-class-name: com.mysql.cj.jdbc.Driver

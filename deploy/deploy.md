@@ -69,6 +69,31 @@ scp user/target/user-0.0.1-SNAPSHOT.jar root@82.157.185.69:/opt/im/jars/user.jar
 cd /opt/im && docker compose restart im-user
 ```
 
+### 时区（踩过一次）
+
+复用的 `campus-mysql` 容器时区是 **UTC**（`time_zone=SYSTEM`，容器内 SYSTEM=UTC）。
+
+如果 JDBC 只写 `serverTimezone=Asia/Shanghai`，它**只影响驱动解析**，不会改变会话时区，
+结果就是 `NOW()` / `CURRENT_TIMESTAMP` 全按 UTC 走，落库时间比实际**早 8 小时**
+（聊天记录显示 13:49，实际是 21:49）。
+
+正确参数（im / user 的 `application.yml` 已加）：
+
+```
+connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true
+```
+
+> `forceConnectionTimeZoneToSession=true` 会让驱动在建连时执行 `SET time_zone='+08:00'`，
+> 只影响我们自己的连接，不干扰同实例上的其它项目。
+
+验证：
+
+```bash
+date '+%Y-%m-%d %H:%M:%S'                       # 21:52:29
+docker exec campus-mysql mysql -uroot -p123456 -N -e "use spring_cloud; select created_at from im_message order by id desc limit 1;"
+# 应与上面一致
+```
+
 ### 已知紧张点
 
 ```

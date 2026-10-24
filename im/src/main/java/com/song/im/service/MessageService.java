@@ -12,15 +12,16 @@ import com.song.im.friend.FriendService;
 import com.song.im.mq.FriendEventPublisher;
 import com.song.im.mq.MessageEvent;
 import com.song.im.mq.MessageEventPublisher;
+import com.song.im.outbox.OutboxRepository;
 import com.song.im.repository.MessageRepository;
 import com.song.im.support.PeerNameResolver;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -45,6 +46,9 @@ public class MessageService {
     /** 单次拉取上限，防止客户端一次要 10 万条 */
     private static final int MAX_PULL_LIMIT = 100;
 
+    /** Outbox 事件序列化（只在这里用，独立实例避免影响其它序列化行为） */
+    private static final ObjectMapper OUTBOX_MAPPER = new ObjectMapper();
+
     /** 撤回时间窗口：2 分钟 */
     private static final long RECALL_WINDOW_MS = 2 * 60 * 1000L;
 
@@ -63,15 +67,19 @@ public class MessageService {
 
     private final FriendEventPublisher friendEventPublisher;
 
+    private final OutboxRepository outboxRepository;
+
     public MessageService(MessageRepository messageRepository, SeqGenerator seqGenerator,
                           MessageEventPublisher eventPublisher, PeerNameResolver peerNameResolver,
-                          FriendService friendService, FriendEventPublisher friendEventPublisher) {
+                          FriendService friendService, FriendEventPublisher friendEventPublisher,
+                          OutboxRepository outboxRepository) {
         this.messageRepository = messageRepository;
         this.seqGenerator = seqGenerator;
         this.eventPublisher = eventPublisher;
         this.peerNameResolver = peerNameResolver;
         this.friendService = friendService;
         this.friendEventPublisher = friendEventPublisher;
+        this.outboxRepository = outboxRepository;
     }
 
     @Transactional
@@ -115,8 +123,9 @@ public class MessageService {
         log.info("消息落库成功 msgId={} conversation={} seq={} from={} to={}",
                 msgId, conversationId, seq, fromUid, request.getTo());
 
-        // 事件必须在事务提交后再发，否则消费端可能查不到这条消息
-        publishAfterCommit(new MessageEvent(msgId, conversationId, seq, fromUid,
+        // Outbox：把"要发 MQ"这件事也写进同一个事务。
+        // 提交成功 = 消息和待办都在；提交失败 = 两者都不在，不存在"消息在库里但通知永久丢失"。
+        writeOutbox(new MessageEvent(msgId, conversationId, seq, fromUid,
                 request.getTo(), request.getContent(), System.currentTimeMillis()));
 
         return new SendResult(msgId, seq, conversationId);
@@ -248,16 +257,17 @@ public class MessageService {
         log.info("消息已撤回 conversation={} seq={} uid={}", conversationId, seq, uid);
     }
 
-    private void publishAfterCommit(MessageEvent event) {
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    eventPublisher.publish(event);
-                }
-            });
-        } else {
-            eventPublisher.publish(event);
+    /**
+     * 把事件写进本地消息表（与业务数据同事务）。
+     *
+     * <p>序列化失败直接抛：让整个发送事务回滚，而不是留下一条"没人会推送"的消息。</p>
+     */
+    private void writeOutbox(MessageEvent event) {
+        try {
+            outboxRepository.insert(MessageEventPublisher.EVENT_MESSAGE_CREATED,
+                    OUTBOX_MAPPER.writeValueAsString(event));
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("消息事件序列化失败 msgId=" + event.getMsgId(), e);
         }
     }
 
