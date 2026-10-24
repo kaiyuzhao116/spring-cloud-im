@@ -13,10 +13,78 @@ export function clearSession() {
   sessionStorage.removeItem(TOKEN_KEY)
 }
 
-async function request(url, { method = 'GET', body, auth = true } = {}) {
-  const headers = { 'Content-Type': 'application/json' }
-  if (auth) {
+/** 剩余不足 5 分钟就主动续签 */
+const RENEW_AHEAD_MS = 5 * 60 * 1000
+
+/** 单飞：多个并发请求同时触发续签时，只发一次 */
+let renewing = null
+
+/** 读出 token 的过期时间（不校验签名，只用来算剩余时长） */
+function expireAt(token) {
+  try {
+    const payload = token.split('.')[1]
+    if (!payload) return 0
+    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'))
+    return (JSON.parse(json).exp || 0) * 1000
+  } catch (e) {
+    return 0
+  }
+}
+
+function needRenew(token) {
+  if (!token) return false
+  const exp = expireAt(token)
+  if (!exp) return false
+  return exp - Date.now() < RENEW_AHEAD_MS
+}
+
+/**
+ * 用旧票换新票。
+ *
+ * <p>文件里唯一一处直接用 fetch 的地方——因为它不能走 request()，
+ * 否则续签失败时会再触发续签，形成递归。</p>
+ *
+ * @return true 表示换到了新票
+ */
+function renewOnce() {
+  if (renewing) return renewing
+
+  renewing = (async () => {
     const token = getToken()
+    if (!token) return false
+
+    try {
+      const response = await fetch('/api/auth/renew', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok || !data || data.code !== 0 || !data.data) {
+        return false
+      }
+      setToken(data.data.accessToken)
+      return true
+    } catch (e) {
+      return false
+    } finally {
+      renewing = null
+    }
+  })()
+
+  return renewing
+}
+
+async function request(url, { method = 'GET', body, auth = true } = {}, retried = false) {
+  const headers = { 'Content-Type': 'application/json' }
+
+  if (auth) {
+    let token = getToken()
+
+    // 第 1 层：票快过期了，先换一张再发请求（换失败也继续，服务端可能还在宽限期内）
+    if (token && needRenew(token)) {
+      await renewOnce()
+      token = getToken()
+    }
     if (token) {
       headers.Authorization = `Bearer ${token}`
     }
@@ -31,6 +99,10 @@ async function request(url, { method = 'GET', body, auth = true } = {}) {
   const data = await response.json().catch(() => ({ code: response.status, message: '响应解析失败' }))
 
   if (response.status === 401 || data.code === 401) {
+    // 第 2 层兜底：可能是票过期了，自动换一次再重试；换不到才回登录页
+    if (auth && !retried && (await renewOnce())) {
+      return request(url, { method, body, auth }, true)
+    }
     clearSession()
     throw new Error(data.message || '登录已失效，请重新登录')
   }

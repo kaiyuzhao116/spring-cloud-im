@@ -975,6 +975,58 @@ body {
   color: var(--brand);
 }
 
+/* 联系人搜索框 */
+.search-box {
+  position: relative;
+  margin: 8px 0 4px;
+}
+
+.search-box input {
+  width: 100%;
+  height: 32px;
+  padding: 0 26px 0 30px;
+  border: 1px solid #e6ebf3;
+  border-radius: 16px;
+  background: #f7f9fc;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text);
+  outline: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2398a3b5' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-3.5-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 10px center;
+  transition: all 0.15s;
+}
+
+.search-box input:focus {
+  background-color: #fff;
+  border-color: #b9cdf5;
+  box-shadow: 0 0 0 3px rgba(59, 124, 246, 0.08);
+}
+
+.search-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: #d8dfea;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.search-clear:hover {
+  background: #b9c4d6;
+}
+
 /* 下拉菜单 */
 .menu {
   position: absolute;

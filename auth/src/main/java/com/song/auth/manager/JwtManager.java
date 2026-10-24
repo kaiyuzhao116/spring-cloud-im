@@ -2,6 +2,7 @@ package com.song.auth.manager;
 
 import com.song.auth.config.JwtProperties;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.stereotype.Component;
@@ -55,6 +56,23 @@ public class JwtManager {
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
+    }
+
+    /**
+     * 解析并允许"刚刚过期"的 token（续签用）。
+     *
+     * <p>业务上需要一个宽限窗口：用户挂着没操作，票过期后才回来点页面，
+     * 这时候应该能自动续签而不是被赶去重新登录。</p>
+     *
+     * @return claims；签名不对等硬错误仍会抛异常
+     */
+    public Claims parseAllowExpired(String token) {
+        try {
+            return parse(token);
+        } catch (ExpiredJwtException e) {
+            // 只有"过期"这一种情况放行，签名错/结构错照样抛
+            return e.getClaims();
+        }
     }
 
     public long getExpireSeconds() {

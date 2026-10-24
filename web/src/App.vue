@@ -49,6 +49,9 @@ const friends = ref([])
 /** 左上角"更多"菜单 */
 const showMenu = ref(false)
 
+/** 联系人搜索关键词（纯前端过滤） */
+const contactKeyword = ref('')
+
 /** 收到的好友申请 */
 const friendRequests = ref([])
 
@@ -182,6 +185,7 @@ const contacts = computed(() => {
   const convMap = new Map(conversations.value.map((c) => [c.peerUid, c]))
   const friendMap = new Map(friends.value.map((f) => [f.uid, f]))
   const uids = new Set([...friendMap.keys(), ...convMap.keys()])
+  const keyword = contactKeyword.value.trim().toLowerCase()
 
   return [...uids]
     .map((uid) => {
@@ -197,7 +201,18 @@ const contacts = computed(() => {
         hasChat: !!conv && !!conv.preview
       }
     })
+    .filter((c) => {
+      if (!keyword) return true
+      return c.name.toLowerCase().includes(keyword) || String(c.uid) === keyword
+    })
     .sort((a, b) => {
+      // 先按"急迫程度"分层：有未读 > 聊过 > 没聊过
+      const tier = (x) => (x.unread > 0 ? 0 : x.hasChat ? 1 : 2)
+      if (tier(a) !== tier(b)) return tier(a) - tier(b)
+
+      // 同层内：聊过的按最近消息时间倒序，没聊过的按名字
+      if (tier(a) === 2) return a.name.localeCompare(b.name, 'zh-Hans-CN')
+
       const ta = a.lastMsgAt || 0
       const tb = b.lastMsgAt || 0
       if (ta !== tb) return tb - ta
@@ -973,6 +988,14 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
+        <!-- 联系人过滤（纯前端，按昵称或 uid） -->
+        <div class="search-box">
+          <input v-model="contactKeyword" type="text" placeholder="搜索联系人" />
+          <button v-if="contactKeyword" type="button" class="search-clear" @click="contactKeyword = ''">
+            ×
+          </button>
+        </div>
+
         <!-- 好友申请（有待处理时才显示） -->
         <template v-if="friendRequests.length > 0">
           <p class="section-title">好友申请（{{ friendRequests.length }}）</p>
@@ -1016,7 +1039,7 @@ onBeforeUnmount(() => {
           </div>
 
           <p v-if="contacts.length === 0" class="contact-empty">
-            还没有好友（注册后会自动加管理员）
+            {{ contactKeyword ? '没有匹配的联系人' : '还没有好友（注册后会自动加管理员）' }}
           </p>
         </div>
       </aside>

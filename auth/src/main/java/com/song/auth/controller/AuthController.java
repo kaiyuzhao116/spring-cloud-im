@@ -43,6 +43,17 @@ public class AuthController {
     }
 
     /**
+     * 滑动续签：用旧票换新票。
+     *
+     * <p>此路径在网关白名单里（不走验签），因为旧票可能"刚刚过期"；
+     * 真正的校验在 auth 内部做（签名、宽限期、作废状态、账号状态）。</p>
+     */
+    @PostMapping("/renew")
+    public Result<LoginResponse> renew(HttpServletRequest httpRequest) {
+        return Result.ok(authService.renew(httpRequest.getHeader("Authorization")));
+    }
+
+    /**
      * 管理员重置他人密码。
      *
      * <p>经网关：{@code POST /api/auth/admin/users/{id}/password}</p>

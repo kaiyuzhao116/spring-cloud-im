@@ -12,6 +12,7 @@ import com.song.auth.manager.JwtManager;
 import com.song.auth.manager.SessionManager;
 import com.song.common.BizException;
 import com.song.common.ResultCode;
+import io.jsonwebtoken.Claims;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +27,9 @@ import org.springframework.stereotype.Service;
 public class AuthService {
 
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
+
+    /** 续签宽限：票过期后仍允许换新票的时间（用户挂了会儿回来） */
+    private static final long RENEW_GRACE_MS = 10 * 60 * 1000L;
 
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
@@ -114,6 +118,63 @@ public class AuthService {
         String accessToken = jwtManager.sign(created.getId());
         return new LoginResponse(created.getId(), created.getNickname(), accessToken,
                 jwtManager.getExpireSeconds(), deviceType);
+    }
+
+    /**
+     * 滑动续签：拿一张（刚过期的）旧票换一张新票。
+     *
+     * <p>四条校验缺一不可：</p>
+     * <ol>
+     *   <li>签名必须正确（防止随便编一张票来换）</li>
+     *   <li>过期时间不能超过宽限窗口（防止拿几个月前的旧票换新票）</li>
+     *   <li>没有被管理员作废（否则被踢的人会借续签复活）</li>
+     *   <li>账号未被禁用</li>
+     * </ol>
+     */
+    public LoginResponse renew(String authorization) {
+        if (authorization == null || !authorization.startsWith("Bearer ")) {
+            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "缺少凭证，请重新登录");
+        }
+        String token = authorization.substring(7).trim();
+
+        Claims claims;
+        try {
+            claims = jwtManager.parseAllowExpired(token);
+        } catch (Exception e) {
+            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "登录已失效，请重新登录");
+        }
+
+        long uid;
+        try {
+            uid = Long.parseLong(claims.getSubject());
+        } catch (Exception e) {
+            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "登录已失效，请重新登录");
+        }
+
+        long issuedAt = claims.getIssuedAt() == null ? 0 : claims.getIssuedAt().getTime();
+        long expireAt = claims.getExpiration() == null ? 0 : claims.getExpiration().getTime();
+        long now = System.currentTimeMillis();
+
+        if (expireAt + RENEW_GRACE_MS < now) {
+            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "登录已过期，请重新登录");
+        }
+        if (sessionManager.isTokenRevoked(uid, issuedAt)) {
+            // 被管理员踢过：旧票一律不能换新票
+            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "登录状态已失效，请重新登录");
+        }
+
+        UserDTO user = userFacade.getById(uid);
+        if (user == null) {
+            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "用户不存在");
+        }
+        if (user.getStatus() == null || user.getStatus() != 1) {
+            throw new BizException(ResultCode.FORBIDDEN.getCode(), "账号已被禁用");
+        }
+
+        String fresh = jwtManager.sign(uid);
+        log.debug("token 已续签 uid={}", uid);
+        return new LoginResponse(uid, user.getNickname(), fresh,
+                jwtManager.getExpireSeconds(), "APP");
     }
 
     /**

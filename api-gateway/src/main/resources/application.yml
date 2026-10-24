@@ -66,6 +66,8 @@ gateway:
     white-list:
       - /api/auth/login
       - /api/auth/register
+      # 续签：旧票可能刚过期，必须由 auth 自己校验（含宽限期与作废状态）
+      - /api/auth/renew
       - /api/auth/refresh
       - /api/auth/sms/code
       - /actuator/health

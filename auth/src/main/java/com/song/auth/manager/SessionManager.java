@@ -74,6 +74,24 @@ public class SessionManager {
     /**
      * 登录失败计数：返回本次失败后的次数。
      */
+    /**
+     * 该 token 是否已被管理员作废。
+     *
+     * <p>im 踢人时写 {@code auth:kicked:{uid} = 踢出时刻}；
+     * 签发时间早于这个时刻的 token 全部作废。</p>
+     */
+    public boolean isTokenRevoked(Long userId, long issuedAtMillis) {
+        String kickedAt = redis.opsForValue().get("auth:kicked:" + userId);
+        if (kickedAt == null) {
+            return false;
+        }
+        try {
+            return issuedAtMillis < Long.parseLong(kickedAt);
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
     public long increaseFailCount(String account, long windowSeconds) {
         String key = "auth:fail:" + account;
         Long count = redis.opsForValue().increment(key);
