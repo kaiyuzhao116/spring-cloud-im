@@ -425,7 +425,12 @@ onBeforeUnmount(() => {
       <form class="form" @submit.prevent="handleLogin">
         <label class="field">
           <span>账号</span>
-          <input v-model="account" type="text" autocomplete="username" placeholder="admin 或 xiaohong" />
+          <input
+            v-model="account"
+            type="text"
+            autocomplete="username"
+            placeholder="admin / xiaohong / xiaoming / xiaogang …"
+          />
         </label>
         <label class="field">
           <span>密码</span>
@@ -437,7 +442,10 @@ onBeforeUnmount(() => {
         <button class="primary" type="submit" :disabled="loading">
           {{ loading ? '登录中…' : '登录' }}
         </button>
-        <p class="hint">开两个标签页分别登录 admin 与 xiaohong，即可互相聊天</p>
+        <p class="hint">
+          多开几个标签页登录不同账号（密码都是 123456）即可互相聊天：<br />
+          admin / xiaohong / xiaoming / xiaogang / xiaoli / xiaowang
+        </p>
       </form>
     </main>
 

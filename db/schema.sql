@@ -26,4 +26,12 @@ CREATE TABLE IF NOT EXISTS `sys_user`
 INSERT IGNORE INTO `sys_user` (`account`, `password_hash`, `nickname`, `status`)
 VALUES ('admin', '$2a$10$oAhOz9YQMsvL.KtOPixjSeN7wWLO66v7A999pdZBsv5uJtA.hxLo6', '管理员', 1);
 
+-- 本地联调用的多账号（密码都是 123456，哈希与 admin 相同）
+INSERT IGNORE INTO `sys_user` (`account`, `password_hash`, `nickname`, `status`)
+VALUES ('xiaohong', '$2a$10$oAhOz9YQMsvL.KtOPixjSeN7wWLO66v7A999pdZBsv5uJtA.hxLo6', '小红', 1),
+       ('xiaoming', '$2a$10$oAhOz9YQMsvL.KtOPixjSeN7wWLO66v7A999pdZBsv5uJtA.hxLo6', '小明', 1),
+       ('xiaogang', '$2a$10$oAhOz9YQMsvL.KtOPixjSeN7wWLO66v7A999pdZBsv5uJtA.hxLo6', '小刚', 1),
+       ('xiaoli', '$2a$10$oAhOz9YQMsvL.KtOPixjSeN7wWLO66v7A999pdZBsv5uJtA.hxLo6', '小李', 1),
+       ('xiaowang', '$2a$10$oAhOz9YQMsvL.KtOPixjSeN7wWLO66v7A999pdZBsv5uJtA.hxLo6', '小王', 1);
+
 SELECT `id`, `account`, `nickname`, `status`, `created_at` FROM `sys_user`;

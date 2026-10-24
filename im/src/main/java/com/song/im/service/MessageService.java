@@ -11,6 +11,7 @@ import com.song.im.domain.SendResult;
 import com.song.im.mq.MessageEvent;
 import com.song.im.mq.MessageEventPublisher;
 import com.song.im.repository.MessageRepository;
+import com.song.im.support.PeerNameResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
@@ -48,11 +49,14 @@ public class MessageService {
 
     private final MessageEventPublisher eventPublisher;
 
+    private final PeerNameResolver peerNameResolver;
+
     public MessageService(MessageRepository messageRepository, SeqGenerator seqGenerator,
-                          MessageEventPublisher eventPublisher) {
+                          MessageEventPublisher eventPublisher, PeerNameResolver peerNameResolver) {
         this.messageRepository = messageRepository;
         this.seqGenerator = seqGenerator;
         this.eventPublisher = eventPublisher;
+        this.peerNameResolver = peerNameResolver;
     }
 
     @Transactional
@@ -152,7 +156,20 @@ public class MessageService {
      */
     public List<ConversationItem> conversations(long uid, int limit) {
         int size = Math.min(Math.max(limit, 1), MAX_PULL_LIMIT);
-        return messageRepository.findConversations(uid, size);
+        List<ConversationItem> items = messageRepository.findConversations(uid, size);
+
+        // 昵称来自 user 服务；查不到就留 null，前端会退回显示 uid
+        return items.stream()
+                .map(item -> new ConversationItem(
+                        item.conversationId(),
+                        item.peerUid(),
+                        peerNameResolver.nicknameOf(item.peerUid()),
+                        item.lastSeq(),
+                        item.lastReadSeq(),
+                        item.unread(),
+                        item.preview(),
+                        item.lastMsgAt()))
+                .toList();
     }
 
     /**
