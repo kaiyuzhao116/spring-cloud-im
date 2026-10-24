@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   acceptFriendRequest,
   clearSession,
@@ -45,6 +45,9 @@ const conversations = ref([])
 
 /** 好友列表（来自 im_friend，点一下即可开始聊天） */
 const friends = ref([])
+
+/** 左上角"更多"菜单 */
+const showMenu = ref(false)
 
 /** 收到的好友申请 */
 const friendRequests = ref([])
@@ -169,13 +172,70 @@ async function loadConversations() {
   }
 }
 
-/** 切换会话：清空当前消息，拉对方的历史 */
-async function switchPeer(c) {
-  c.unread = 0
-  if (c.peerUid === peer.value.id) return
+/**
+ * 左侧统一联系人列表 = 好友为底 + 会话补预览/未读。
+ *
+ * <p>之前"消息"和"好友"两个列表会让同一个人出现两次，用户不知道该点哪个；
+ * 合成一个之后：有聊天记录显示预览和时间，没有就显示"还没有聊过"。</p>
+ */
+const contacts = computed(() => {
+  const convMap = new Map(conversations.value.map((c) => [c.peerUid, c]))
+  const friendMap = new Map(friends.value.map((f) => [f.uid, f]))
+  const uids = new Set([...friendMap.keys(), ...convMap.keys()])
 
-  peer.value = { id: c.peerUid, name: c.name }
+  return [...uids]
+    .map((uid) => {
+      const conv = convMap.get(uid)
+      const friend = friendMap.get(uid)
+      return {
+        uid,
+        name: (friend && friend.nickname) || (conv && conv.name) || nicknameOf(uid),
+        online: !!(friend && friend.online),
+        preview: conv ? conv.preview || '' : '',
+        unread: conv ? conv.unread || 0 : 0,
+        lastMsgAt: conv ? conv.lastMsgAt : null,
+        hasChat: !!conv && !!conv.preview
+      }
+    })
+    .sort((a, b) => {
+      const ta = a.lastMsgAt || 0
+      const tb = b.lastMsgAt || 0
+      if (ta !== tb) return tb - ta
+      return a.uid - b.uid
+    })
+})
+
+/** 会话列表里的时间：今天显示 HH:mm，昨天显示"昨天"，更早显示 M/D */
+function formatListTime(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  const today = new Date()
+  if (d.toDateString() === today.toDateString()) return formatTime(ts)
+
+  const yesterday = new Date(today)
+  yesterday.setDate(today.getDate() - 1)
+  if (d.toDateString() === yesterday.toDateString()) return '昨天'
+
+  return `${d.getMonth() + 1}/${d.getDate()}`
+}
+
+/** 头像底色按 uid 取，避免所有人都是同一种蓝 */
+const AVATAR_COLORS = ['#5b8def', '#7c6cf0', '#e879a6', '#f59e0b', '#10b981', '#06b6d4']
+
+function avatarColor(uid) {
+  return AVATAR_COLORS[(uid || 0) % AVATAR_COLORS.length]
+}
+
+/** 点联系人：清未读 → 切换会话 → 拉历史 */
+async function selectContact(item) {
+  const conv = conversations.value.find((c) => c.peerUid === item.uid)
+  if (conv) conv.unread = 0
+
+  if (item.uid === peer.value.id) return
+
+  peer.value = { id: item.uid, name: item.name }
   messages.value = []
+  hasMore.value = false
   await loadHistory()
 }
 
@@ -315,16 +375,7 @@ function refreshSocial() {
   loadFriendRequests()
 }
 
-/** 从好友列表点开聊天（可能还没有任何会话，历史为空） */
-async function openFriend(f) {
-  const name = f.nickname || nicknameOf(f.uid)
-  if (f.uid === peer.value.id) return
 
-  peer.value = { id: f.uid, name }
-  messages.value = []
-  hasMore.value = false
-  await loadHistory()
-}
 
 function scrollToBottom() {
   nextTick(() => {
@@ -485,6 +536,7 @@ function handleFrame(frame) {
     if (conv) {
       conv.preview = frame.content
       conv.lastSeq = frame.seq
+      conv.lastMsgAt = Date.now()   // 用于左侧按最近消息排序
       if (conv.peerUid === peer.value.id) {
         // 正在看这个会话：直接算已读
         conv.unread = 0
@@ -804,6 +856,7 @@ function handleSend() {
   const conv = conversations.value.find((c) => c.peerUid === peer.value.id)
   if (conv) {
     conv.preview = text
+    conv.lastMsgAt = Date.now()
   }
 }
 
@@ -895,16 +948,30 @@ onBeforeUnmount(() => {
     <!-- 已登录：聊天 -->
     <main v-else class="chat">
       <aside class="contacts">
+        <!-- 自己 + 操作（收成一行，把按钮收进菜单） -->
         <div class="me">
-          <div class="avatar">{{ (profile.nickname || profile.account).charAt(0) }}</div>
+          <div class="avatar small" :style="{ background: avatarColor(profile.id) }">
+            {{ (profile.nickname || profile.account).charAt(0) }}
+          </div>
           <div class="me-info">
             <strong>{{ profile.nickname || profile.account }}</strong>
-            <span>uid {{ profile.id }}</span>
+            <span>
+              <i class="dot" :class="status"></i>
+              {{ statusText[status] }}
+            </span>
           </div>
-          <i class="dot" :class="status"></i>
-        </div>
+          <button class="icon-btn" type="button" title="添加好友" @click="openAddFriend">＋</button>
+          <button class="icon-btn" type="button" title="更多" @click="showMenu = !showMenu">⋯</button>
 
-        <button class="ghost add-friend" type="button" @click="openAddFriend">＋ 添加好友</button>
+          <div v-if="showMenu" class="menu">
+            <button v-if="isAdmin()" type="button" class="menu-item" @click="showMenu = false; openAdmin()">
+              管理后台
+            </button>
+            <button type="button" class="menu-item danger" @click="showMenu = false; handleLogout()">
+              退出登录
+            </button>
+          </div>
+        </div>
 
         <!-- 好友申请（有待处理时才显示） -->
         <template v-if="friendRequests.length > 0">
@@ -923,52 +990,35 @@ onBeforeUnmount(() => {
           </div>
         </template>
 
-        <p class="section-title">消息</p>
+        <!-- 联系人：好友与会话合并，一个人只出现一次 -->
         <div class="contact-list">
           <div
-            v-for="c in conversations"
-            :key="c.conversationId"
+            v-for="c in contacts"
+            :key="c.uid"
             class="contact"
-            :class="{ active: c.peerUid === peer.id }"
-            @click="switchPeer(c)"
+            :class="{ active: c.uid === peer.id }"
+            @click="selectContact(c)"
           >
-            <div class="avatar small">{{ c.name.charAt(0) }}</div>
-            <div class="contact-info">
-              <strong>{{ c.name }}</strong>
-              <span class="preview">{{ c.preview || '暂无消息' }}</span>
+            <div class="avatar small" :style="{ background: avatarColor(c.uid) }">
+              {{ c.name.charAt(0) }}
             </div>
-            <span v-if="c.unread > 0" class="badge">{{ c.unread > 99 ? '99+' : c.unread }}</span>
-          </div>
-
-          <p v-if="conversations.length === 0" class="contact-empty">还没有会话</p>
-        </div>
-
-        <p class="section-title">好友</p>
-        <div class="contact-list">
-          <div
-            v-for="f in friends"
-            :key="f.uid"
-            class="contact"
-            :class="{ active: f.uid === peer.id }"
-            @click="openFriend(f)"
-          >
-            <div class="avatar small">{{ (f.nickname || nicknameOf(f.uid)).charAt(0) }}</div>
             <div class="contact-info">
               <strong>
-                {{ f.nickname || nicknameOf(f.uid) }}
-                <span class="presence" :class="{ on: f.online }" :title="f.online ? '在线' : '离线'"></span>
+                {{ c.name }}
+                <span v-if="c.online" class="presence on" title="在线"></span>
               </strong>
-              <span class="preview">{{ f.online ? '在线' : '点我开始聊天' }}</span>
+              <span class="preview">{{ c.hasChat ? c.preview : '还没有聊过' }}</span>
+            </div>
+            <div class="contact-side">
+              <span class="contact-time">{{ formatListTime(c.lastMsgAt) }}</span>
+              <span v-if="c.unread > 0" class="badge">{{ c.unread > 99 ? '99+' : c.unread }}</span>
             </div>
           </div>
 
-          <p v-if="friends.length === 0" class="contact-empty">还没有好友（注册后会自动加管理员）</p>
+          <p v-if="contacts.length === 0" class="contact-empty">
+            还没有好友（注册后会自动加管理员）
+          </p>
         </div>
-
-        <button v-if="isAdmin()" class="ghost admin-entry" type="button" @click="openAdmin">
-          管理后台
-        </button>
-        <button class="ghost logout" type="button" @click="handleLogout">退出登录</button>
       </aside>
 
       <!-- 加好友弹窗 -->
@@ -1069,9 +1119,14 @@ onBeforeUnmount(() => {
 
       <section class="conversation">
         <header class="conv-header">
-          <div>
-            <strong>{{ peer.name }}</strong>
-            <span class="status-text">{{ statusText[status] }}</span>
+          <div class="conv-peer">
+            <div class="avatar small" :style="{ background: avatarColor(peer.id) }">
+              {{ (peer.name || '?').charAt(0) }}
+            </div>
+            <div>
+              <strong>{{ peer.name }}</strong>
+              <span class="status-text">{{ statusText[status] }}</span>
+            </div>
           </div>
         </header>
 
@@ -1093,7 +1148,22 @@ onBeforeUnmount(() => {
           </button>
           <p v-else-if="messages.length > 0" class="loading-more">没有更早的消息了</p>
 
-          <p v-if="messages.length === 0" class="empty">还没有消息，说点什么吧</p>
+          <div v-if="messages.length === 0" class="empty-state">
+            <svg class="empty-icon" viewBox="0 0 48 48" width="44" height="44" aria-hidden="true">
+              <path
+                d="M8 12a6 6 0 0 1 6-6h20a6 6 0 0 1 6 6v14a6 6 0 0 1-6 6H20l-8 7v-7h-2a2 2 0 0 1-2-2V12z"
+                fill="none"
+                stroke="#c9d4e6"
+                stroke-width="2.5"
+                stroke-linejoin="round"
+              />
+              <circle cx="18" cy="19" r="1.8" fill="#d5dfef" />
+              <circle cx="24" cy="19" r="1.8" fill="#d5dfef" />
+              <circle cx="30" cy="19" r="1.8" fill="#d5dfef" />
+            </svg>
+            <p class="empty-title">还没有消息</p>
+            <p class="empty-sub">跟「{{ peer.name }}」打个招呼吧</p>
+          </div>
 
           <template v-for="(msg, index) in messages" :key="msg.key">
             <!-- 时间分隔：第一条、跨天、或间隔超过 5 分钟才显示 -->
@@ -1160,13 +1230,20 @@ onBeforeUnmount(() => {
           <div class="composer-row">
             <input
               v-model="draft"
+              class="composer-input"
               type="text"
               :disabled="status !== 'connected'"
-              :placeholder="status === 'connected' ? '输入消息，回车发送' : '连接已断开，请重新登录'"
+              :placeholder="status === 'connected' ? '输入消息…' : '连接已断开，请重新登录'"
               @keyup.enter="handleSend"
             />
-            <button class="primary" type="button" :disabled="status !== 'connected'" @click="handleSend">
-              发送
+            <button
+              class="send-btn"
+              type="button"
+              :disabled="status !== 'connected' || !draft.trim()"
+              title="发送（回车）"
+              @click="handleSend"
+            >
+              ➤
             </button>
           </div>
         </footer>
