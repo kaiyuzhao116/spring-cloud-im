@@ -3,6 +3,7 @@ package com.song.im.service;
 import com.song.common.BizException;
 import com.song.common.ResultCode;
 import com.song.im.domain.ConversationId;
+import com.song.im.domain.ConversationItem;
 import com.song.im.domain.MessageItem;
 import com.song.im.domain.PullResult;
 import com.song.im.domain.SendRequest;
@@ -142,6 +143,30 @@ public class MessageService {
             rows = rows.subList(0, size);
         }
         return new PullResult(rows, hasMore);
+    }
+
+    /**
+     * 会话列表（按最近消息时间倒序）。
+     *
+     * <p>只看 im_conversation_member 一张表，按 uid 走索引，不回消息表。</p>
+     */
+    public List<ConversationItem> conversations(long uid, int limit) {
+        int size = Math.min(Math.max(limit, 1), MAX_PULL_LIMIT);
+        return messageRepository.findConversations(uid, size);
+    }
+
+    /**
+     * 上报已读：把 last_read_seq 推进到 seq（只增不减）。
+     *
+     * <p>未读数是算出来的（last_seq - last_read_seq），所以这里推进一次，
+     * 会话列表里的未读立刻变小，不需要另外维护计数。</p>
+     */
+    public void markRead(long uid, String conversationId, long seq) {
+        if (!ConversationId.contains(conversationId, uid)) {
+            throw new BizException(403, "无权操作该会话");
+        }
+        int rows = messageRepository.markRead(conversationId, uid, seq);
+        log.debug("已读上报 uid={} conversation={} seq={} 影响行数={}", uid, conversationId, seq, rows);
     }
 
     private void publishAfterCommit(MessageEvent event) {

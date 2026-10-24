@@ -53,6 +53,20 @@ export function fetchProfile() {
   return request('/api/user/profile')
 }
 
+/** 上报已读位置（只增不减） */
+export function markRead(conv, seq) {
+  return request('/api/im/read', {
+    method: 'POST',
+    body: { conv, seq }
+  })
+}
+
+/** 会话列表（含未读数），按最近消息时间倒序 */
+export function fetchConversations(limit = 50) {
+  const qs = new URLSearchParams({ limit: String(limit) })
+  return request(`/api/im/conversations?${qs.toString()}`)
+}
+
 /**
  * 拉消息。
  * @param {string} conv 会话 ID，如 s_1_2

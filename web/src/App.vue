@@ -1,6 +1,16 @@
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { clearSession, fetchMessages, fetchProfile, getToken, login, logout, setToken } from './api'
+import {
+  clearSession,
+  fetchConversations,
+  fetchMessages,
+  fetchProfile,
+  getToken,
+  login,
+  logout,
+  markRead,
+  setToken
+} from './api'
 import { ChatSocket } from './ws'
 
 const account = ref('admin')
@@ -14,6 +24,12 @@ const messages = ref([])
 const draft = ref('')
 const status = ref('idle')
 const listEl = ref(null)
+
+/** 会话列表（含未读数） */
+const conversations = ref([])
+
+/** 每个会话已上报过的最大 seq，避免重复请求 */
+const readSent = {}
 
 /** 更早的消息还有没有（后端返回的 hasMore） */
 const hasMore = ref(false)
@@ -45,9 +61,38 @@ const statusError = {
 }
 
 function resolvePeer(me) {
-  // 本地演示：库里只有两个账号，互相为对端
+  // 兜底：会话列表为空时，按"另一个账号"来猜对端
   if (me.id === 1) return { id: 2, name: '小红' }
   return { id: 1, name: '管理员' }
+}
+
+/** 昵称映射（后端暂未返回 peerName，先按 uid 映射；接入 user 服务后可删） */
+function nicknameOf(uid) {
+  if (uid === 1) return '管理员'
+  if (uid === 2) return '小红'
+  return `用户${uid}`
+}
+
+async function loadConversations() {
+  try {
+    const list = await fetchConversations(50)
+    conversations.value = list.map((c) => ({
+      ...c,
+      name: c.peerName || nicknameOf(c.peerUid)
+    }))
+  } catch (e) {
+    console.warn('会话列表加载失败:', e.message)
+  }
+}
+
+/** 切换会话：清空当前消息，拉对方的历史 */
+async function switchPeer(c) {
+  c.unread = 0
+  if (c.peerUid === peer.value.id) return
+
+  peer.value = { id: c.peerUid, name: c.name }
+  messages.value = []
+  await loadHistory()
 }
 
 function scrollToBottom() {
@@ -93,6 +138,22 @@ function handleFrame(frame) {
       seq: frame.seq,
       status: 'received'
     })
+
+    // 同步更新左侧会话卡片
+    const conv = conversations.value.find((c) => c.peerUid === frame.from)
+    if (conv) {
+      conv.preview = frame.content
+      conv.lastSeq = frame.seq
+      if (conv.peerUid === peer.value.id) {
+        // 正在看这个会话：直接算已读
+        conv.unread = 0
+        reportRead(conversationId(), frame.seq)
+      } else {
+        conv.unread = (conv.unread || 0) + 1
+      }
+    } else {
+      loadConversations()   // 新会话（对方第一次发消息给我）
+    }
     return
   }
   if (frame.type === 'ACK') {
@@ -151,6 +212,7 @@ async function loadHistory() {
     }))
     hasMore.value = data.hasMore
     scrollToBottom()
+    reportRead(conversationId(), lastSeqValue())   // 打开会话即视为已读
   } catch (e) {
     console.warn('历史消息加载失败:', e.message)
   }
@@ -206,6 +268,27 @@ function lastSeqValue() {
 }
 
 /**
+ * 上报已读：把"我看到第几条"告诉服务端。
+ *
+ * <p>未读数是 last_seq - last_read_seq 算出来的，推进它就能把红点消掉；
+ * 服务端只增不减，所以重复上报、乱序上报都不会出错。</p>
+ */
+async function reportRead(convId, seq) {
+  if (!convId || !seq) return
+  if ((readSent[convId] || 0) >= seq) return   // 同一个位置只报一次
+  readSent[convId] = seq
+
+  const item = conversations.value.find((c) => c.conversationId === convId)
+  if (item) item.unread = 0
+
+  try {
+    await markRead(convId, seq)
+  } catch (e) {
+    console.warn('已读上报失败:', e.message)
+  }
+}
+
+/**
  * 重连后补缺口：只拉"我最后看到的 seq"之后的消息。
  *
  * <p>这是"离线消息"的正解——不靠推送补发，靠客户端上报进度 + 服务端按 seq 补。</p>
@@ -242,7 +325,9 @@ async function catchUp() {
 async function loadProfile() {
   try {
     profile.value = await fetchProfile()
-    peer.value = resolvePeer(profile.value)
+    await loadConversations()
+    const first = conversations.value[0]
+    peer.value = first ? { id: first.peerUid, name: first.name } : resolvePeer(profile.value)
     await loadHistory()      // 先灌历史，再建连，避免实时消息被历史覆盖
     connect()
   } catch (e) {
@@ -290,6 +375,12 @@ function handleSend() {
   pushMessage({ key: cid, mine: true, content: text, seq: null, status: 'sending' })
   draft.value = ''
   error.value = ''
+
+  // 左侧会话卡片的预览同步更新
+  const conv = conversations.value.find((c) => c.peerUid === peer.value.id)
+  if (conv) {
+    conv.preview = text
+  }
 }
 
 async function handleLogout() {
@@ -359,15 +450,26 @@ onBeforeUnmount(() => {
             <strong>{{ profile.nickname || profile.account }}</strong>
             <span>uid {{ profile.id }}</span>
           </div>
+          <i class="dot" :class="status"></i>
         </div>
 
-        <div class="contact active">
-          <div class="avatar small">{{ peer.name.charAt(0) }}</div>
-          <div class="contact-info">
-            <strong>{{ peer.name }}</strong>
-            <span>uid {{ peer.id }}</span>
+        <div class="contact-list">
+          <div
+            v-for="c in conversations"
+            :key="c.conversationId"
+            class="contact"
+            :class="{ active: c.peerUid === peer.id }"
+            @click="switchPeer(c)"
+          >
+            <div class="avatar small">{{ c.name.charAt(0) }}</div>
+            <div class="contact-info">
+              <strong>{{ c.name }}</strong>
+              <span class="preview">{{ c.preview || '暂无消息' }}</span>
+            </div>
+            <span v-if="c.unread > 0" class="badge">{{ c.unread > 99 ? '99+' : c.unread }}</span>
           </div>
-          <i class="dot" :class="status"></i>
+
+          <p v-if="conversations.length === 0" class="contact-empty">还没有会话</p>
         </div>
 
         <button class="ghost logout" type="button" @click="handleLogout">退出登录</button>

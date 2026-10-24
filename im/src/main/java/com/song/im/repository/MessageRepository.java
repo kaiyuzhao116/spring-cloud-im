@@ -1,5 +1,6 @@
 package com.song.im.repository;
 
+import com.song.im.domain.ConversationItem;
 import com.song.im.domain.MessageItem;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -147,6 +148,53 @@ public class MessageRepository {
                         rs.getString("content"),
                         rs.getTimestamp("created_at").getTime()),
                 conversationId, afterSeq, limit);
+    }
+
+    /**
+     * 某用户的会话列表，按最近消息时间倒序。
+     *
+     * <p>走 {@code idx_uid_time(uid, last_msg_at DESC)}，不需要回消息表。</p>
+     */
+    public List<ConversationItem> findConversations(long uid, int limit) {
+        return jdbcTemplate.query("""
+                        SELECT conversation_id, peer_uid, last_seq, last_read_seq,
+                               last_msg_preview, last_msg_at
+                        FROM im_conversation_member
+                        WHERE uid = ?
+                        ORDER BY last_msg_at DESC
+                        LIMIT ?
+                        """,
+                (rs, rowNum) -> {
+                    long lastSeq = rs.getLong("last_seq");
+                    long lastReadSeq = rs.getLong("last_read_seq");
+                    Timestamp at = rs.getTimestamp("last_msg_at");
+                    return new ConversationItem(
+                            rs.getString("conversation_id"),
+                            rs.getLong("peer_uid"),
+                            null,
+                            lastSeq,
+                            lastReadSeq,
+                            Math.max(0, lastSeq - lastReadSeq),
+                            rs.getString("last_msg_preview"),
+                            at == null ? null : at.getTime());
+                },
+                uid, limit);
+    }
+
+    /**
+     * 推进已读位置（只增不减）。
+     *
+     * <p>用 {@code GREATEST} 而不是直接赋值：客户端重复上报、乱序上报都不会把已读位置退回。</p>
+     *
+     * @return 影响行数；0 表示该用户不在这个会话里（或会话不存在）
+     */
+    public int markRead(String conversationId, long uid, long seq) {
+        return jdbcTemplate.update("""
+                        UPDATE im_conversation_member
+                        SET last_read_seq = GREATEST(last_read_seq, ?)
+                        WHERE conversation_id = ? AND uid = ?
+                        """,
+                seq, conversationId, uid);
     }
 
     public record MessageRow(long id, long seq) {

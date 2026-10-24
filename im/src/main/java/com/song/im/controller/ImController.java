@@ -4,7 +4,9 @@ import com.song.common.BizException;
 import com.song.common.Result;
 import com.song.common.ResultCode;
 import com.song.common.UserContext;
+import com.song.im.domain.ConversationItem;
 import com.song.im.domain.PullResult;
+import com.song.im.domain.ReadRequest;
 import com.song.im.domain.SendRequest;
 import com.song.im.domain.SendResult;
 import com.song.im.service.MessageService;
@@ -16,6 +18,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * im 对外 HTTP 接口（联调用，正式入口仍是网关 + ws-gateway）。
@@ -67,6 +71,41 @@ public class ImController {
             return Result.ok(messageService.pullAfter(userId, conv, afterSeq, limit));
         }
         return Result.ok(messageService.pull(userId, conv, beforeSeq, limit));
+    }
+
+    /**
+     * 会话列表（含未读数），按最近消息时间倒序。
+     *
+     * <p>经网关：{@code GET /api/im/conversations?limit=50}</p>
+     */
+    @GetMapping("/conversations")
+    public Result<List<ConversationItem>> conversations(
+            @RequestParam(value = "limit", defaultValue = "50") int limit,
+            @RequestHeader(value = "X-User-Id", required = false) String userIdHeader) {
+        Long userId = resolveUserId(userIdHeader);
+        if (userId == null) {
+            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "缺少身份信息，请通过网关访问");
+        }
+        return Result.ok(messageService.conversations(userId, limit));
+    }
+
+    /**
+     * 上报已读位置。
+     *
+     * <p>经网关：{@code POST /api/im/read}，body {@code {"conv":"s_1_2","seq":43}}</p>
+     */
+    @PostMapping("/read")
+    public Result<Void> markRead(@RequestBody ReadRequest request,
+                                 @RequestHeader(value = "X-User-Id", required = false) String userIdHeader) {
+        Long userId = resolveUserId(userIdHeader);
+        if (userId == null) {
+            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "缺少身份信息，请通过网关访问");
+        }
+        if (request.conv() == null || request.conv().isBlank()) {
+            throw new BizException(ResultCode.BAD_REQUEST.getCode(), "conv 不能为空");
+        }
+        messageService.markRead(userId, request.conv(), request.seq());
+        return Result.ok(null);
     }
 
     private Long resolveUserId(String userIdHeader) {
