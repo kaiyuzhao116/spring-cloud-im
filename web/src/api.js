@@ -52,3 +52,18 @@ export function logout() {
 export function fetchProfile() {
   return request('/api/user/profile')
 }
+
+/**
+ * 拉历史消息。
+ * @param {string} conv      会话 ID，如 s_1_2
+ * @param {number} beforeSeq 取该 seq 之前的；0 表示取最新
+ * @param {number} limit     条数（服务端上限 100）
+ */
+export function fetchMessages(conv, beforeSeq = 0, limit = 30) {
+  const qs = new URLSearchParams({
+    conv,
+    beforeSeq: String(beforeSeq),
+    limit: String(limit)
+  })
+  return request(`/api/im/messages?${qs.toString()}`)
+}

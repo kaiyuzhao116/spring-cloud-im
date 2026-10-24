@@ -3,6 +3,8 @@ package com.song.im.service;
 import com.song.common.BizException;
 import com.song.common.ResultCode;
 import com.song.im.domain.ConversationId;
+import com.song.im.domain.MessageItem;
+import com.song.im.domain.PullResult;
 import com.song.im.domain.SendRequest;
 import com.song.im.domain.SendResult;
 import com.song.im.mq.MessageEvent;
@@ -18,6 +20,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * 发消息：校验 → 幂等 → 取 seq → 落库（消息 + 双方卡片）。
@@ -32,6 +37,9 @@ public class MessageService {
     private static final int MAX_CONTENT_LENGTH = 2000;
 
     private static final int PREVIEW_LENGTH = 100;
+
+    /** 单次拉取上限，防止客户端一次要 10 万条 */
+    private static final int MAX_PULL_LIMIT = 100;
 
     private final MessageRepository messageRepository;
 
@@ -87,6 +95,33 @@ public class MessageService {
                 request.getTo(), request.getContent(), System.currentTimeMillis()));
 
         return new SendResult(msgId, seq, conversationId);
+    }
+
+    /**
+     * 拉取历史消息（按 seq 倒序取，返回时转为升序）。
+     *
+     * @param beforeSeq 取该 seq 之前的消息；传 0 或负数表示取最新的
+     * @param limit     期望条数，内部夹在 1~100
+     */
+    public PullResult pull(long uid, String conversationId, long beforeSeq, int limit) {
+        if (!ConversationId.contains(conversationId, uid)) {
+            throw new BizException(403, "无权查看该会话");
+        }
+
+        int size = Math.min(Math.max(limit, 1), MAX_PULL_LIMIT);
+        long upperBound = beforeSeq <= 0 ? Long.MAX_VALUE : beforeSeq;
+
+        // 多取一条，用来判断"更早的还有没有"
+        List<MessageItem> rows = messageRepository.findBefore(conversationId, upperBound, size + 1);
+        boolean hasMore = rows.size() > size;
+        if (hasMore) {
+            rows = rows.subList(0, size);
+        }
+
+        // 数据库按 seq 倒序取出（利于 LIMIT），返回给前端时转成升序
+        List<MessageItem> ascending = new ArrayList<>(rows);
+        Collections.reverse(ascending);
+        return new PullResult(ascending, hasMore);
     }
 
     private void publishAfterCommit(MessageEvent event) {

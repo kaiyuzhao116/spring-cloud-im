@@ -1,6 +1,6 @@
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { clearSession, fetchProfile, getToken, login, logout, setToken } from './api'
+import { clearSession, fetchMessages, fetchProfile, getToken, login, logout, setToken } from './api'
 import { ChatSocket } from './ws'
 
 const account = ref('admin')
@@ -14,6 +14,13 @@ const messages = ref([])
 const draft = ref('')
 const status = ref('idle')
 const listEl = ref(null)
+
+/** 更早的消息还有没有（后端返回的 hasMore） */
+const hasMore = ref(false)
+/** 防止滚动时重复触发加载 */
+const loadingMore = ref(false)
+/** 内存里最多保留多少条，超出丢弃最老的（防止 DOM 无限增长） */
+const MAX_KEEP = 300
 
 let socket = null
 
@@ -49,27 +56,41 @@ function scrollToBottom() {
   })
 }
 
+/** 追加一条消息，并裁掉超出上限的最老消息 */
+function pushMessage(item, toBottom = true) {
+  messages.value.push(item)
+  if (messages.value.length > MAX_KEEP) {
+    messages.value.splice(0, messages.value.length - MAX_KEEP)
+  }
+  if (toBottom) {
+    scrollToBottom()
+  }
+}
+
 function handleFrame(frame) {
   if (frame.type === 'MSG') {
     // from=0 是系统消息（欢迎、通知…），居中展示，不属于任何会话
     if (frame.from === 0) {
-      messages.value.push({
+      pushMessage({
         key: `sys-${Date.now()}-${messages.value.length}`,
         system: true,
         content: frame.content
       })
-      scrollToBottom()
       return
     }
 
-    messages.value.push({
+    // 同一条消息可能既在历史里、又被实时推过来，按 seq 去重
+    if (messages.value.some((m) => m.seq === frame.seq && !m.mine)) {
+      return
+    }
+
+    pushMessage({
       key: `peer-${frame.seq}`,
       mine: false,
       content: frame.content,
       seq: frame.seq,
       status: 'received'
     })
-    scrollToBottom()
     return
   }
   if (frame.type === 'ACK') {
@@ -103,10 +124,80 @@ function connect() {
   socket.connect()
 }
 
+/** 会话 ID：s_{小uid}_{大uid}，和后端 ConversationId.single 规则一致 */
+function conversationId() {
+  const a = profile.value.id
+  const b = peer.value.id
+  return `s_${Math.min(a, b)}_${Math.max(a, b)}`
+}
+
+/** 拉历史消息；失败不打断聊天（只是看不到旧记录） */
+async function loadHistory() {
+  try {
+    const data = await fetchMessages(conversationId(), 0, 30)
+    messages.value = data.messages.map((m) => ({
+      key: `h-${m.seq}`,
+      mine: m.from === profile.value.id,
+      content: m.content,
+      seq: m.seq,
+      status: 'sent'
+    }))
+    hasMore.value = data.hasMore
+    scrollToBottom()
+  } catch (e) {
+    console.warn('历史消息加载失败:', e.message)
+  }
+}
+
+/** 上滑到顶部时加载更早的消息；插入后补偿滚动高度，保证视口不跳 */
+async function loadMore() {
+  if (!hasMore.value || loadingMore.value) return
+  const oldest = messages.value.find((m) => m.seq)
+  if (!oldest) return
+
+  loadingMore.value = true
+  const el = listEl.value
+  const prevHeight = el ? el.scrollHeight : 0
+
+  try {
+    const data = await fetchMessages(conversationId(), oldest.seq, 20)
+    const existing = new Set(messages.value.filter((m) => m.seq).map((m) => m.seq))
+    const older = data.messages
+      .filter((m) => !existing.has(m.seq))
+      .map((m) => ({
+        key: `h-${m.seq}`,
+        mine: m.from === profile.value.id,
+        content: m.content,
+        seq: m.seq,
+        status: 'sent'
+      }))
+
+    messages.value.unshift(...older)
+    hasMore.value = data.hasMore
+
+    await nextTick()
+    if (el) {
+      // 视口补偿：保持用户当前看到的内容不动
+      el.scrollTop += el.scrollHeight - prevHeight
+    }
+  } catch (e) {
+    console.warn('加载更多失败:', e.message)
+  } finally {
+    loadingMore.value = false
+  }
+}
+
+function handleScroll() {
+  if (listEl.value && listEl.value.scrollTop < 40) {
+    loadMore()
+  }
+}
+
 async function loadProfile() {
   try {
     profile.value = await fetchProfile()
     peer.value = resolvePeer(profile.value)
+    await loadHistory()      // 先灌历史，再建连，避免实时消息被历史覆盖
     connect()
   } catch (e) {
     error.value = e.message
@@ -150,10 +241,9 @@ function handleSend() {
     error.value = '发送失败，连接已断开'
     return
   }
-  messages.value.push({ key: cid, mine: true, content: text, seq: null, status: 'sending' })
+  pushMessage({ key: cid, mine: true, content: text, seq: null, status: 'sending' })
   draft.value = ''
   error.value = ''
-  scrollToBottom()
 }
 
 async function handleLogout() {
@@ -245,7 +335,19 @@ onBeforeUnmount(() => {
           </div>
         </header>
 
-        <div ref="listEl" class="messages">
+        <div ref="listEl" class="messages" @scroll="handleScroll">
+          <!-- 顶部：可点击加载更早，避免"上滑"这个交互太隐蔽；内容不满一屏时也能用 -->
+          <button
+            v-if="hasMore"
+            type="button"
+            class="loading-more clickable"
+            :disabled="loadingMore"
+            @click="loadMore"
+          >
+            {{ loadingMore ? '加载中…' : '加载更早的消息' }}
+          </button>
+          <p v-else-if="messages.length > 0" class="loading-more">没有更早的消息了</p>
+
           <p v-if="messages.length === 0" class="empty">还没有消息，说点什么吧</p>
 
           <div

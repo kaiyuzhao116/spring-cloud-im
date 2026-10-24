@@ -1,5 +1,6 @@
 package com.song.im.repository;
 
+import com.song.im.domain.MessageItem;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -99,6 +100,31 @@ public class MessageRepository {
                 conversationId, fromUid, toUid, seq, seq, preview, messageTime);
         jdbcTemplate.update(UPSERT_RECEIVER,
                 conversationId, toUid, fromUid, seq, preview, messageTime);
+    }
+
+    /**
+     * 拉取某会话在 {@code beforeSeq} 之前的消息（倒序取，由调用方决定是否反转）。
+     *
+     * <p>走唯一索引 {@code uk_conv_seq(conversation_id, seq)}，是范围扫描，不会全表扫。</p>
+     *
+     * @param beforeSeq 上界（不含）；传 {@link Long#MAX_VALUE} 表示取最新
+     * @param limit     最多取几条（调用方通常多取 1 条用于判断 hasMore）
+     */
+    public List<MessageItem> findBefore(String conversationId, long beforeSeq, int limit) {
+        return jdbcTemplate.query("""
+                        SELECT id, seq, from_uid, content, created_at
+                        FROM im_message
+                        WHERE conversation_id = ? AND seq < ?
+                        ORDER BY seq DESC
+                        LIMIT ?
+                        """,
+                (rs, rowNum) -> new MessageItem(
+                        rs.getLong("id"),
+                        rs.getLong("seq"),
+                        rs.getLong("from_uid"),
+                        rs.getString("content"),
+                        rs.getTimestamp("created_at").getTime()),
+                conversationId, beforeSeq, limit);
     }
 
     public record MessageRow(long id, long seq) {

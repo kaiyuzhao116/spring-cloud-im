@@ -4,14 +4,17 @@ import com.song.common.BizException;
 import com.song.common.Result;
 import com.song.common.ResultCode;
 import com.song.common.UserContext;
+import com.song.im.domain.PullResult;
 import com.song.im.domain.SendRequest;
 import com.song.im.domain.SendResult;
 import com.song.im.service.MessageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -39,6 +42,26 @@ public class ImController {
         }
         log.info("收到发消息请求 from={} to={} cid={}", fromUid, request.getTo(), request.getCid());
         return Result.ok(messageService.send(fromUid, request));
+    }
+
+    /**
+     * 拉取历史消息。
+     *
+     * <p>经网关访问：{@code GET /api/im/messages?conv=s_1_2&beforeSeq=0&limit=20}
+     * （网关 StripPrefix=2 后到达本方法的 {@code /messages}）。</p>
+     *
+     * @param beforeSeq 上界（不含该 seq）；0 表示取最新
+     */
+    @GetMapping("/messages")
+    public Result<PullResult> pull(@RequestParam("conv") String conv,
+                                   @RequestParam(value = "beforeSeq", defaultValue = "0") long beforeSeq,
+                                   @RequestParam(value = "limit", defaultValue = "20") int limit,
+                                   @RequestHeader(value = "X-User-Id", required = false) String userIdHeader) {
+        Long userId = resolveUserId(userIdHeader);
+        if (userId == null) {
+            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "缺少身份信息，请通过网关访问");
+        }
+        return Result.ok(messageService.pull(userId, conv, beforeSeq, limit));
     }
 
     private Long resolveUserId(String userIdHeader) {
