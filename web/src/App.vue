@@ -1251,6 +1251,12 @@ onBeforeUnmount(() => {
 
               <template v-else>
                 <div
+                  class="row-avatar"
+                  :style="{ background: avatarColor(msg.mine ? profile.id : msg.from) }"
+                >
+                  {{ msg.mine ? (profile.nickname || profile.account).charAt(0) : nameOf(msg.from).charAt(0) }}
+                </div>
+                <div
                   class="bubble"
                   :class="{ failed: msg.status === 'failed', recalled: msg.recalled }"
                   :title="msg.status === 'failed' ? '点击重发' : ''"

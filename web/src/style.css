@@ -1588,3 +1588,75 @@ body {
   }
 }
 
+/* ==================== 视觉优化 v5：消息头像 / 纹理背景 / 时间胶囊 ==================== */
+
+/* 页面外围背景：淡点阵，留白不再空荡 */
+body {
+  background-image: radial-gradient(circle, rgba(120, 140, 180, 0.14) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+/* 消息区：淡点阵纹理，气泡浮在纹理上更有层次 */
+.messages {
+  background-color: #f6f8fc;
+  background-image: radial-gradient(circle, #dde3ee 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* 消息行：为头像让位 */
+.row.peer {
+  position: relative;
+  margin-left: 46px;
+}
+.row.mine {
+  position: relative;
+  margin-right: 46px;
+}
+.row-avatar {
+  position: absolute;
+  top: 2px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(31, 45, 76, 0.15);
+}
+.row.peer .row-avatar { left: -46px; }
+.row.mine .row-avatar { right: -46px; }
+
+/* 对方气泡：加一点点投影，在纹理上更清晰 */
+.row.peer .bubble {
+  box-shadow: 0 2px 8px rgba(31, 45, 76, 0.06);
+}
+
+/* 时间分隔：胶囊化，不再悬空 */
+.msg-time {
+  align-self: center;
+  padding: 3px 12px;
+  border-radius: 12px;
+  background: rgba(140, 155, 180, 0.12);
+  color: #8a94a6;
+}
+
+/* ---------- v5 暗色覆盖 ---------- */
+@media (prefers-color-scheme: dark) {
+  body {
+    background-image: radial-gradient(circle, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  }
+  .messages {
+    background-color: #131927;
+    background-image: radial-gradient(circle, #1f2739 1px, transparent 1px);
+  }
+  .row.peer .bubble {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  }
+  .msg-time {
+    background: rgba(255, 255, 255, 0.07);
+    color: var(--muted);
+  }
+}
+
