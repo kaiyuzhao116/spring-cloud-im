@@ -52,6 +52,12 @@
             <artifactId>spring-boot-starter-amqp</artifactId>
         </dependency>
 
+        <!-- Redis：在线表 ws:online:{uid}（多实例定位连接所在实例） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
         <!-- JWT 验签（版本由父 pom 管理） -->
         <dependency>
             <groupId>io.jsonwebtoken</groupId>

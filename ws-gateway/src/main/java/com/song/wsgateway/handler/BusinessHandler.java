@@ -6,6 +6,7 @@ import com.song.wsgateway.protocol.Frame;
 import com.song.wsgateway.protocol.FrameType;
 import com.song.wsgateway.session.ChannelAttrs;
 import com.song.wsgateway.session.CloseReason;
+import com.song.wsgateway.session.OnlineRegistry;
 import com.song.wsgateway.support.ImClient;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
@@ -52,9 +53,12 @@ public class BusinessHandler extends SimpleChannelInboundHandler<TextWebSocketFr
 
     private final ExecutorService bizExecutor;
 
-    public BusinessHandler(ImClient imClient, ExecutorService bizExecutor) {
+    private final OnlineRegistry onlineRegistry;
+
+    public BusinessHandler(ImClient imClient, ExecutorService bizExecutor, OnlineRegistry onlineRegistry) {
         this.imClient = imClient;
         this.bizExecutor = bizExecutor;
+        this.onlineRegistry = onlineRegistry;
     }
 
     // ==================== 入口 ====================
@@ -101,7 +105,14 @@ public class BusinessHandler extends SimpleChannelInboundHandler<TextWebSocketFr
         }
 
         switch (type) {
-            case PING -> sendFrame(ctx, Frame.pong());              // 轻量，留在 EventLoop
+            case PING -> {
+                sendFrame(ctx, Frame.pong());                      // 轻量，留在 EventLoop
+                Long uid = userIdOf(ctx);
+                if (uid != null) {
+                    // 借客户端心跳给在线表续期：25 秒一次，远小于 120 秒 TTL
+                    onlineRegistry.touch(uid);
+                }
+            }
             case MSG -> handleMessageAsync(ctx, in);                // 重活，切线程池
             default -> log.warn("不支持的上行帧 type={}", in.getType());
         }

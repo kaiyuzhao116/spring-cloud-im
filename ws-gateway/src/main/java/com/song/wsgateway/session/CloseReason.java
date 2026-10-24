@@ -19,6 +19,9 @@ public enum CloseReason {
     /** 单帧超过业务上限，服务端拒绝并断开 */
     MESSAGE_TOO_BIG("message_too_big"),
 
+    /** 同账号在别处登录，旧连接被踢（单端登录） */
+    KICKED("kicked"),
+
     /** handler 里抛了异常 */
     ERROR("error");
 

@@ -7,6 +7,13 @@ spring:
     username: guest
     password: guest
 
+  # 在线表：ws:online:{uid} HASH，field=connId，value=实例地址
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      timeout: 2000ms
+
 # Netty 接入层参数（后续由 NettyServer 读取）
 netty:
   port: 8089

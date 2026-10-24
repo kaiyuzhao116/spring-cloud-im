@@ -3,7 +3,9 @@ package com.song.wsgateway.server;
 import com.song.wsgateway.handler.AuthHandshakeHandler;
 import com.song.wsgateway.handler.BusinessHandler;
 import com.song.wsgateway.handler.ConnectionHandler;
+import com.song.wsgateway.mq.KickPublisher;
 import com.song.wsgateway.session.ChannelManager;
+import com.song.wsgateway.session.OnlineRegistry;
 import com.song.wsgateway.support.ImClient;
 import com.song.wsgateway.support.JwtVerifier;
 import io.netty.bootstrap.ServerBootstrap;
@@ -51,6 +53,10 @@ public class NettyServer implements SmartLifecycle {
 
     private final ExecutorService bizExecutor;
 
+    private final OnlineRegistry onlineRegistry;
+
+    private final KickPublisher kickPublisher;
+
     private EventLoopGroup bossGroup;
 
     private EventLoopGroup workerGroup;
@@ -60,12 +66,15 @@ public class NettyServer implements SmartLifecycle {
     private volatile boolean running;
 
     public NettyServer(NettyProperties properties, JwtVerifier jwtVerifier, ChannelManager channelManager,
-                       ImClient imClient, @Qualifier("bizExecutor") ExecutorService bizExecutor) {
+                       ImClient imClient, @Qualifier("bizExecutor") ExecutorService bizExecutor,
+                       OnlineRegistry onlineRegistry, KickPublisher kickPublisher) {
         this.properties = properties;
         this.jwtVerifier = jwtVerifier;
         this.channelManager = channelManager;
         this.imClient = imClient;
         this.bizExecutor = bizExecutor;
+        this.onlineRegistry = onlineRegistry;
+        this.kickPublisher = kickPublisher;
     }
 
     @Override
@@ -128,9 +137,9 @@ public class NettyServer implements SmartLifecycle {
                 // ⑤ 空闲检测：超过 N 秒无读写 → 抛出 IdleStateEvent
                 .addLast(new IdleStateHandler(0, 0, properties.getHeartbeatIdleSeconds()))
                 // ⑥ 业务处理：限大小、分流、落库、回执
-                .addLast(new BusinessHandler(imClient, bizExecutor))
-                // ⑦ 连接生命周期：登记、注销、存活时长统计
-                .addLast(new ConnectionHandler(channelManager));
+                .addLast(new BusinessHandler(imClient, bizExecutor, onlineRegistry))
+                // ⑦ 连接生命周期：登记、注销、存活时长、在线表、单端踢人
+                .addLast(new ConnectionHandler(channelManager, onlineRegistry, kickPublisher));
     }
 
     @Override

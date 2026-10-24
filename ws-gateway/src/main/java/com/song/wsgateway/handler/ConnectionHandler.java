@@ -2,9 +2,11 @@ package com.song.wsgateway.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.song.wsgateway.protocol.Frame;
+import com.song.wsgateway.mq.KickPublisher;
 import com.song.wsgateway.session.ChannelAttrs;
 import com.song.wsgateway.session.ChannelManager;
 import com.song.wsgateway.session.CloseReason;
+import com.song.wsgateway.session.OnlineRegistry;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
@@ -37,6 +39,10 @@ public class ConnectionHandler extends ChannelInboundHandlerAdapter {
 
     private final ChannelManager channelManager;
 
+    private final OnlineRegistry onlineRegistry;
+
+    private final KickPublisher kickPublisher;
+
     /**
      * 本条连接的编号。
      *
@@ -45,8 +51,16 @@ public class ConnectionHandler extends ChannelInboundHandlerAdapter {
      */
     private String connId;
 
-    public ConnectionHandler(ChannelManager channelManager) {
+    private Long userIdOf(ChannelHandlerContext ctx) {
+        return ctx.channel().attr(ChannelAttrs.USER_ID).get();
+    }
+
+    public ConnectionHandler(ChannelManager channelManager,
+                             OnlineRegistry onlineRegistry,
+                             KickPublisher kickPublisher) {
         this.channelManager = channelManager;
+        this.onlineRegistry = onlineRegistry;
+        this.kickPublisher = kickPublisher;
     }
 //userEventTriggered 是 Netty 用来通知"某个非 IO 事件发生了"的统一入口，HandshakeComplete 
 // 是 WebSocketServerProtocolHandler 在 101 完成后抛出的具体事件对象；我们用 instanceof 认出它
@@ -62,7 +76,18 @@ public class ConnectionHandler extends ChannelInboundHandlerAdapter {
 
             channelManager.register(connId, ctx.channel());
 
-            // 登记完立刻推一条系统消息，让用户看到"通道已通"
+            // ① 写入全局在线表（含 TTL，靠 PING 续期）
+            Long uid = userIdOf(ctx);
+            if (uid != null) {
+                onlineRegistry.register(uid, connId);
+
+                // ② 单端登录：广播"踢掉这个账号除我之外的连接"
+                //    本机与远端实例都会收到，各自查本机连接表
+                Long connectTime = ctx.channel().attr(ChannelAttrs.CONNECT_TIME).get();
+                kickPublisher.publish(uid, connId, connectTime == null ? System.currentTimeMillis() : connectTime);
+            }
+
+            // ③ 推一条系统消息，让用户看到"通道已通"
             sendWelcome(ctx);
 
             Long tokenExp = ctx.channel().attr(ChannelAttrs.TOKEN_EXP).get();
@@ -93,10 +118,15 @@ public class ConnectionHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-        // 所有关闭路径（客户端断开 / 空闲超时 / 异常 / 将来的 token 过期）最终都会汇合到这里，
+        // 所有关闭路径（客户端断开 / 空闲超时 / 被踢 / 异常）最终都会汇合到这里，
         // 因此"清理"只写这一处即可
+        Long uid = userIdOf(ctx);
         if (connId != null) {
             channelManager.unregister(connId);
+            if (uid != null) {
+                // 只删自己这个 field，不能 DEL 整个 key（会误删同账号的其它连接）
+                onlineRegistry.remove(uid, connId);
+            }
         }
 
         Long connectTime = ctx.channel().attr(ChannelAttrs.CONNECT_TIME).get();
