@@ -1,8 +1,86 @@
 # 部署到腾讯云轻量服务器
 
-目标服务器：`82.157.185.69`（CentOS 7.6 + Docker 26）
+## 〇、当前线上实例（已部署，可直接体验）
+
+| 项 | 值 |
+|---|---|
+| **访问地址** | **http://82.157.185.69:8081** |
+| 演示账号 | `admin` / `123456`（管理员）；`xiaohong`、`xiaoming`、`xiaogang`、`xiaoli`、`xiaowang` 密码同为 `123456` |
+| 也可注册 | 点登录页「还没有账号？去注册」，注册后自动与所有人成为好友 |
+| 主机 | 腾讯云轻量 · CentOS 7.6 · Docker 26 · 3.6G 内存（已加 2G swap） |
+| 部署目录 | `/opt/im`（compose 项目名 `im`） |
+| 对外端口 | **8081**（nginx 统一入口，已放行防火墙） |
+| 系统 firewall | 未启用（`firewalld: inactive`），仅腾讯云控制台防火墙生效 |
+
+### 与"全新服务器"的差异（重要）
+
+这台机器上**已经有别的项目在跑**，所以本实例做了两处调整：
+
+| 项 | 处理方式 |
+|---|---|
+| MySQL / Redis / RabbitMQ | **不重复启动**，直接复用已有容器：`campus-mysql`(root/123456)、`campus-redis`(无密码)、`campus-rabbitmq`(admin/123456)，省约 600M 内存 |
+| 8080 端口 | 已被 `campus-api` 占用 → **api-gateway 改跑 18080**，nginx 反代指向 18080 |
+| Nacos | 单独起容器 `im-nacos`（standalone，堆 256m） |
+
+### 实际运行的 7 个容器
+
+```
+im-nacos    nacos/nacos-server:v2.2.3    8848
+im-user     eclipse-temurin:21-jre       8084
+im-auth     eclipse-temurin:21-jre       8083
+im-im       eclipse-temurin:21-jre       8085
+im-gateway  eclipse-temurin:21-jre       18080
+im-ws       eclipse-temurin:21-jre       8089
+im-web      nginx:1.27-alpine            8081（对外）
+```
+
+### 常用运维
+
+```bash
+cd /opt/im
+docker compose ps                      # 状态
+docker compose logs -f im-gateway      # 看日志
+docker compose restart im-im           # 重启单个服务
+docker compose down && docker compose up -d   # 全量重启（数据在 MySQL，不会丢）
+```
+
+### 更新前端（只改页面时）
+
+```bash
+# 本地
+cd web && npm run build
+scp -r dist/index.html dist/assets root@82.157.185.69:/opt/im/web/
+
+# 服务器上不用重启容器，nginx 直接读文件
+```
+
+### 更新后端（改了 jar 时）
+
+```bash
+# 本地
+mvn -q -DskipTests package
+scp user/target/user-0.0.1-SNAPSHOT.jar root@82.157.185.69:/opt/im/jars/user.jar
+# 其余服务同理 → 然后在服务器上
+cd /opt/im && docker compose restart im-user
+```
+
+### 已知紧张点
+
+```
+内存 3.6G：已用约 3.2G，Swap 占用约 700M
+   ↓
+JVM 堆已压到 128~320m；若并发上来会变慢
+   ↓
+扩容方案：调小 nacos/im 的堆，或服务器升到 4G
+```
+
+---
 
 ## 一、先做体检（很重要）
+
+> 以下是**全新服务器**的通用步骤，本机已完成，仅作参考。
+
+目标服务器：`82.157.185.69`（CentOS 7.6 + Docker 26）
 
 ```bash
 # 1. 内存：本项目约需 2.5~3G（6 个 JVM + MySQL + Nacos + Redis + RabbitMQ）

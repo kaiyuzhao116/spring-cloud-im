@@ -406,6 +406,13 @@ body {
 }
 
 /* 好友在线状态小圆点 */
+/* 未选择联系人时的占位头像 */
+.ghost-avatar {
+  background: #eef2f8 !important;
+  color: #b3bfd2;
+  font-size: 13px;
+}
+
 .presence {
   display: inline-block;
   width: 7px;

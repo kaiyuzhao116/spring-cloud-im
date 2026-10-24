@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   acceptFriendRequest,
   clearSession,
@@ -150,10 +150,16 @@ const statusError = {
   'token-expired': '登录已过期，请重新登录'
 }
 
-function resolvePeer(me) {
-  // 兜底：会话列表为空时，按"另一个账号"来猜对端
-  if (me.id === 1) return { id: 2, name: '小红' }
-  return { id: 1, name: '管理员' }
+/**
+ * 没有任何会话/好友时的对端。
+ *
+ * <p>以前这里写死"admin↔小红"，导致新库（好友表为空）进去会看到一个
+ * 根本不存在的联系人，发出去的消息又被服务端以 403 拒绝。</p>
+ *
+ * <p>现在返回 id=0 的空对端，界面显示"从左侧选择联系人"，输入框禁用。</p>
+ */
+function resolvePeer() {
+  return { id: 0, name: '' }
 }
 
 /** 昵称映射（后端暂未返回 peerName，先按 uid 映射；接入 user 服务后可删） */
@@ -218,6 +224,16 @@ const contacts = computed(() => {
       if (ta !== tb) return tb - ta
       return a.uid - b.uid
     })
+})
+
+/** 是否选中了一个真实联系人（id=0 表示还没选） */
+const hasPeer = computed(() => peer.value && peer.value.id > 0)
+
+// 联系人列表从空变有时（比如刚注册完、或别人加了你），自动打开第一个
+watch(contacts, (list) => {
+  if (!hasPeer.value && list.length > 0) {
+    selectContact(list[0])
+  }
 })
 
 /** 会话列表里的时间：今天显示 HH:mm，昨天显示"昨天"，更早显示 M/D */
@@ -632,6 +648,7 @@ function connect() {
 
 /** 会话 ID：s_{小uid}_{大uid}，和后端 ConversationId.single 规则一致 */
 function conversationId() {
+  if (!hasPeer.value) return ''
   const a = profile.value.id
   const b = peer.value.id
   return `s_${Math.min(a, b)}_${Math.max(a, b)}`
@@ -639,6 +656,11 @@ function conversationId() {
 
 /** 拉历史消息；失败不打断聊天（只是看不到旧记录） */
 async function loadHistory() {
+  if (!hasPeer.value) {
+    messages.value = []
+    hasMore.value = false
+    return
+  }
   try {
     const data = await fetchMessages(conversationId(), { limit: 30 })
     messages.value = data.messages.map((m) => ({
@@ -842,6 +864,10 @@ async function handleRegister() {
 function handleSend() {
   const text = draft.value.trim()
   if (!text) return
+  if (!hasPeer.value) {
+    error.value = '请先在左侧选择一位联系人'
+    return
+  }
   if (status.value !== 'connected') {
     // 保留"被踢/过期/过大"这类具体原因，不要被通用提示覆盖
     error.value = statusError[status.value] || '连接未建立，稍后再试'
@@ -1142,12 +1168,19 @@ onBeforeUnmount(() => {
 
       <section class="conversation">
         <header class="conv-header">
-          <div class="conv-peer">
+          <div v-if="hasPeer" class="conv-peer">
             <div class="avatar small" :style="{ background: avatarColor(peer.id) }">
               {{ (peer.name || '?').charAt(0) }}
             </div>
             <div>
               <strong>{{ peer.name }}</strong>
+              <span class="status-text">{{ statusText[status] }}</span>
+            </div>
+          </div>
+          <div v-else class="conv-peer">
+            <div class="avatar small ghost-avatar">?</div>
+            <div>
+              <strong>未选择联系人</strong>
               <span class="status-text">{{ statusText[status] }}</span>
             </div>
           </div>
@@ -1184,8 +1217,14 @@ onBeforeUnmount(() => {
               <circle cx="24" cy="19" r="1.8" fill="#d5dfef" />
               <circle cx="30" cy="19" r="1.8" fill="#d5dfef" />
             </svg>
-            <p class="empty-title">还没有消息</p>
-            <p class="empty-sub">跟「{{ peer.name }}」打个招呼吧</p>
+            <p class="empty-title">{{ hasPeer ? '还没有消息' : '还没有选择联系人' }}</p>
+            <p class="empty-sub">
+              {{
+                hasPeer
+                  ? `跟「${peer.name}」打个招呼吧`
+                  : '从左侧选一位好友，或点右上角 ＋ 添加好友'
+              }}
+            </p>
           </div>
 
           <template v-for="(msg, index) in messages" :key="msg.key">
@@ -1255,14 +1294,20 @@ onBeforeUnmount(() => {
               v-model="draft"
               class="composer-input"
               type="text"
-              :disabled="status !== 'connected'"
-              :placeholder="status === 'connected' ? '输入消息…' : '连接已断开，请重新登录'"
+              :disabled="status !== 'connected' || !hasPeer"
+              :placeholder="
+                !hasPeer
+                  ? '请先选择一位联系人'
+                  : status === 'connected'
+                    ? '输入消息…'
+                    : '连接已断开，请重新登录'
+              "
               @keyup.enter="handleSend"
             />
             <button
               class="send-btn"
               type="button"
-              :disabled="status !== 'connected' || !draft.trim()"
+              :disabled="status !== 'connected' || !hasPeer || !draft.trim()"
               title="发送（回车）"
               @click="handleSend"
             >
