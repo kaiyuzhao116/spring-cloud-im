@@ -54,15 +54,18 @@ export function fetchProfile() {
 }
 
 /**
- * 拉历史消息。
- * @param {string} conv      会话 ID，如 s_1_2
- * @param {number} beforeSeq 取该 seq 之前的；0 表示取最新
- * @param {number} limit     条数（服务端上限 100）
+ * 拉消息。
+ * @param {string} conv 会话 ID，如 s_1_2
+ * @param {object} opts
+ * @param {number} opts.beforeSeq 取该 seq 之前的（翻历史）；0 表示取最新
+ * @param {number} opts.afterSeq  取该 seq 之后的（重连补缺口）；0 表示不补
+ * @param {number} opts.limit     条数（服务端上限 100）
  */
-export function fetchMessages(conv, beforeSeq = 0, limit = 30) {
+export function fetchMessages(conv, { beforeSeq = 0, afterSeq = 0, limit = 30 } = {}) {
   const qs = new URLSearchParams({
     conv,
     beforeSeq: String(beforeSeq),
+    afterSeq: String(afterSeq),
     limit: String(limit)
   })
   return request(`/api/im/messages?${qs.toString()}`)

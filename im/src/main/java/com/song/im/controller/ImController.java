@@ -55,11 +55,16 @@ public class ImController {
     @GetMapping("/messages")
     public Result<PullResult> pull(@RequestParam("conv") String conv,
                                    @RequestParam(value = "beforeSeq", defaultValue = "0") long beforeSeq,
+                                   @RequestParam(value = "afterSeq", defaultValue = "0") long afterSeq,
                                    @RequestParam(value = "limit", defaultValue = "20") int limit,
                                    @RequestHeader(value = "X-User-Id", required = false) String userIdHeader) {
         Long userId = resolveUserId(userIdHeader);
         if (userId == null) {
             throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "缺少身份信息，请通过网关访问");
+        }
+        // afterSeq > 0：补缺口（升序）；否则：翻历史/取最新（升序返回）
+        if (afterSeq > 0) {
+            return Result.ok(messageService.pullAfter(userId, conv, afterSeq, limit));
         }
         return Result.ok(messageService.pull(userId, conv, beforeSeq, limit));
     }

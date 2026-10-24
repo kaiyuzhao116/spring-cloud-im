@@ -23,6 +23,8 @@ const loadingMore = ref(false)
 const MAX_KEEP = 300
 
 let socket = null
+/** 是否成功连接过：用来区分"首次连接"和"重连"（只有重连才补缺口） */
+let everConnected = false
 
 const statusText = {
   idle: '未连接',
@@ -118,6 +120,11 @@ function connect() {
         error.value = statusError[s]
       } else if (s === 'connected') {
         error.value = ''
+        // 首次连接靠 loadHistory 灌数据；之后的重连才需要补缺口
+        if (everConnected) {
+          catchUp()
+        }
+        everConnected = true
       }
     }
   })
@@ -134,7 +141,7 @@ function conversationId() {
 /** 拉历史消息；失败不打断聊天（只是看不到旧记录） */
 async function loadHistory() {
   try {
-    const data = await fetchMessages(conversationId(), 0, 30)
+    const data = await fetchMessages(conversationId(), { limit: 30 })
     messages.value = data.messages.map((m) => ({
       key: `h-${m.seq}`,
       mine: m.from === profile.value.id,
@@ -160,7 +167,7 @@ async function loadMore() {
   const prevHeight = el ? el.scrollHeight : 0
 
   try {
-    const data = await fetchMessages(conversationId(), oldest.seq, 20)
+    const data = await fetchMessages(conversationId(), { beforeSeq: oldest.seq, limit: 20 })
     const existing = new Set(messages.value.filter((m) => m.seq).map((m) => m.seq))
     const older = data.messages
       .filter((m) => !existing.has(m.seq))
@@ -190,6 +197,45 @@ async function loadMore() {
 function handleScroll() {
   if (listEl.value && listEl.value.scrollTop < 40) {
     loadMore()
+  }
+}
+
+/** 本地已知的最大 seq，重连补缺口时作为下界 */
+function lastSeqValue() {
+  return messages.value.reduce((max, m) => Math.max(max, m.seq || 0), 0)
+}
+
+/**
+ * 重连后补缺口：只拉"我最后看到的 seq"之后的消息。
+ *
+ * <p>这是"离线消息"的正解——不靠推送补发，靠客户端上报进度 + 服务端按 seq 补。</p>
+ */
+async function catchUp() {
+  const from = lastSeqValue()
+  if (!from) return
+  try {
+    const data = await fetchMessages(conversationId(), { afterSeq: from, limit: 100 })
+    const existing = new Set(messages.value.filter((m) => m.seq).map((m) => m.seq))
+    const missed = data.messages.filter((m) => !existing.has(m.seq))
+
+    if (missed.length === 0) return
+
+    missed.forEach((m) => {
+      pushMessage(
+        {
+          key: `h-${m.seq}`,
+          mine: m.from === profile.value.id,
+          content: m.content,
+          seq: m.seq,
+          status: 'sent'
+        },
+        false
+      )
+    })
+    scrollToBottom()
+    console.info(`重连补到 ${missed.length} 条漏掉的消息`)
+  } catch (e) {
+    console.warn('重连补消息失败:', e.message)
   }
 }
 

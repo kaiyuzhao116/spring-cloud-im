@@ -124,6 +124,26 @@ public class MessageService {
         return new PullResult(ascending, hasMore);
     }
 
+    /**
+     * 拉取 {@code afterSeq} 之后的消息（升序），用于断线重连后补缺口。
+     *
+     * <p>客户端只需要记住"我最后看到的 seq"，重连时传上来，
+     * 服务端把漏掉的按顺序给它，不需要推送补发。</p>
+     */
+    public PullResult pullAfter(long uid, String conversationId, long afterSeq, int limit) {
+        if (!ConversationId.contains(conversationId, uid)) {
+            throw new BizException(403, "无权查看该会话");
+        }
+
+        int size = Math.min(Math.max(limit, 1), MAX_PULL_LIMIT);
+        List<MessageItem> rows = messageRepository.findAfter(conversationId, afterSeq, size + 1);
+        boolean hasMore = rows.size() > size;
+        if (hasMore) {
+            rows = rows.subList(0, size);
+        }
+        return new PullResult(rows, hasMore);
+    }
+
     private void publishAfterCommit(MessageEvent event) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {

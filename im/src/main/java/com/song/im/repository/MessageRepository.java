@@ -127,6 +127,28 @@ public class MessageRepository {
                 conversationId, beforeSeq, limit);
     }
 
+    /**
+     * 拉取某会话在 {@code afterSeq} 之后的消息（升序，用于重连补缺口）。
+     *
+     * @param afterSeq 下界（不含），通常是客户端本地已知的最大 seq
+     */
+    public List<MessageItem> findAfter(String conversationId, long afterSeq, int limit) {
+        return jdbcTemplate.query("""
+                        SELECT id, seq, from_uid, content, created_at
+                        FROM im_message
+                        WHERE conversation_id = ? AND seq > ?
+                        ORDER BY seq ASC
+                        LIMIT ?
+                        """,
+                (rs, rowNum) -> new MessageItem(
+                        rs.getLong("id"),
+                        rs.getLong("seq"),
+                        rs.getLong("from_uid"),
+                        rs.getString("content"),
+                        rs.getTimestamp("created_at").getTime()),
+                conversationId, afterSeq, limit);
+    }
+
     public record MessageRow(long id, long seq) {
     }
 }
