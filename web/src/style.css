@@ -1191,3 +1191,400 @@ body {
   border: 1px solid #eaeff7;
 }
 
+/* ==================== 视觉优化 v3：动效与细节 ==================== */
+
+/* 统一细窄半透明滚动条（ Chromium / WebKit / Edge ） */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(130, 150, 180, 0.28);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(130, 150, 180, 0.5);
+  background-clip: padding-box;
+}
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(130, 150, 180, 0.35) transparent;
+}
+
+/* 消息 / 时间分隔 / 系统提示：柔和上浮入场
+   opacity 从 0.45 起，批量加载历史也不会"闪空" */
+.row,
+.msg-time,
+.system-tip {
+  animation: msg-in 0.24s ease both;
+}
+@keyframes msg-in {
+  from { opacity: 0.45; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 模态框：遮罩淡入 + 卡片轻微缩放上浮 */
+.modal-mask {
+  animation: fade-in 0.18s ease;
+}
+.modal {
+  animation: modal-in 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 左上角"更多"下拉菜单：从右上展开 */
+.menu {
+  animation: menu-in 0.16s ease;
+  transform-origin: top right;
+}
+@keyframes menu-in {
+  from { opacity: 0; transform: scale(0.92) translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* 选中联系人：左侧渐变色条，比纯背景更醒目 */
+.contact {
+  position: relative;
+  transition: background 0.16s, transform 0.16s;
+}
+.contact.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 56%;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(var(--brand), var(--brand-2));
+}
+.contact:active {
+  transform: scale(0.985);
+}
+
+/* 登录页：账号 / 密码 / 昵称输入框带前置图标 */
+.field-account input,
+.field-password input,
+.field-nickname input {
+  padding-left: 38px;
+  background-repeat: no-repeat;
+  background-position: 13px center;
+}
+.field-account input {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2398a3b5' stroke-width='2'%3E%3Ccircle cx='12' cy='8' r='4'/%3E%3Cpath d='M4 20a8 8 0 0 1 16 0'/%3E%3C/svg%3E");
+}
+.field-password input {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2398a3b5' stroke-width='2'%3E%3Crect x='4' y='10' width='16' height='10' rx='2'/%3E%3Cpath d='M8 10V7a4 4 0 0 1 8 0v3'/%3E%3C/svg%3E");
+}
+.field-nickname input {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2398a3b5' stroke-width='2'%3E%3Cpath d='M16 18a6 6 0 0 0-12 0'/%3E%3Ccircle cx='10' cy='8' r='3'/%3E%3Cpath d='M18 7h4M18 11h4M18 15h4'/%3E%3C/svg%3E");
+}
+
+/* 降低动效偏好：尊重用户系统设置 */
+@media (prefers-reduced-motion: reduce) {
+  .row,
+  .msg-time,
+  .system-tip,
+  .modal-mask,
+  .modal,
+  .menu,
+  .contact {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ==================== 视觉优化 v4：暗色模式 / 状态图标 / 登录分屏 / 未读脉冲 ==================== */
+
+/* ---------- 未读 badge：出现弹跳 + 持续微光呼吸 ---------- */
+.badge {
+  animation: badge-pop 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+             badge-glow 2.4s ease-in-out infinite 0.4s;
+}
+@keyframes badge-pop {
+  0% { transform: scale(0.4); }
+  60% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+@keyframes badge-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+  50% { box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.18); }
+}
+
+/* ---------- 自己消息的状态图标（取代纯文字 seq） ---------- */
+.meta .status {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #a4adbd;
+}
+.meta .status.sending { color: #b6a24a; }
+.meta .status.sent { color: #5fa0f0; }
+.meta .status svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+.meta .failed-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--err);
+}
+.meta .failed-text svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* ---------- 登录页：左品牌区 + 右登录卡 分屏 ---------- */
+.page.auth-layout {
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  align-items: stretch;
+  padding: 0;
+  overflow: hidden;
+}
+.auth-hero {
+  position: relative;
+  padding: 64px 56px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+  color: #fff;
+  background: linear-gradient(135deg, #3b7cf6 0%, #6d5cf6 55%, #8b5cf6 100%);
+  overflow: hidden;
+}
+/* 动态网格背景：缓速移动 + 径向渐隐 */
+.auth-hero::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.09) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.09) 1px, transparent 1px);
+  background-size: 42px 42px;
+  animation: grid-move 22s linear infinite;
+  -webkit-mask: radial-gradient(circle at 62% 38%, #000 0%, transparent 78%);
+  mask: radial-gradient(circle at 62% 38%, #000 0%, transparent 78%);
+  pointer-events: none;
+}
+/* 柔和高光球，增加层次 */
+.auth-hero::after {
+  content: '';
+  position: absolute;
+  width: 360px;
+  height: 360px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  filter: blur(90px);
+  top: -120px;
+  right: -80px;
+  pointer-events: none;
+}
+@keyframes grid-move {
+  from { background-position: 0 0; }
+  to { background-position: 42px 42px; }
+}
+.auth-hero > * { position: relative; z-index: 1; }
+.auth-hero-logo {
+  width: 60px;
+  height: 60px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  backdrop-filter: blur(8px);
+}
+.auth-hero h2 {
+  margin: 6px 0 0;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.auth-hero p {
+  margin: 0;
+  font-size: 13px;
+  opacity: 0.82;
+  line-height: 1.6;
+}
+.auth-features {
+  list-style: none;
+  margin: 22px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.auth-features li {
+  font-size: 14px;
+  opacity: 0.9;
+  padding-left: 26px;
+  position: relative;
+}
+.auth-features li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 16 16' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.5L6.5 12L13 4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 9px;
+}
+/* 分屏时右栏：登录卡居中 */
+.page.auth-layout .card {
+  margin: auto;
+  border: 1px solid var(--line);
+}
+/* 窄屏：回到单卡居中，隐藏品牌区 */
+@media (max-width: 860px) {
+  .page.auth-layout {
+    display: flex;
+    padding: 28px;
+  }
+  .auth-hero { display: none; }
+}
+
+/* ---------- 暗色模式 ---------- */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1420;
+    --panel: #161c2b;
+    --panel-2: #1a2032;
+    --line: #2a3346;
+    --text: #e6e9f2;
+    --muted: #8b94a8;
+    --brand: #4d8dff;
+    --brand-2: #8268ff;
+  }
+  body {
+    background: linear-gradient(180deg, #0b0f1a 0%, #111726 45%, #0f1420 100%);
+  }
+  .glow-a { background: #1e2d5e; }
+  .glow-b { background: #3a2660; }
+
+  /* 面板/卡片底色 */
+  .card,
+  .chat,
+  .modal,
+  .me,
+  .contact,
+  .conv-header,
+  .composer,
+  .request-item,
+  .result-item,
+  .admin-row,
+  .menu,
+  .system-tip,
+  .bubble.recalled {
+    background: var(--panel);
+  }
+  .contacts { background: var(--panel-2); }
+
+  /* 输入框 */
+  .field input,
+  .composer-row input,
+  .composer-input,
+  .search-box input,
+  .modal-search input {
+    background: #1e2436;
+    border-color: var(--line);
+    color: var(--text);
+  }
+  .field input::placeholder,
+  .composer-row input::placeholder,
+  .composer-input::placeholder,
+  .search-box input::placeholder { color: #5a6478; }
+  .field input:focus,
+  .composer-row input:focus,
+  .composer-input:focus,
+  .search-box input:focus {
+    background: var(--panel);
+    border-color: rgba(77, 141, 255, 0.6);
+  }
+
+  /* 消息区与气泡 */
+  .messages { background: #131927; }
+  .row.peer .bubble {
+    background: #1e2436;
+    border-color: var(--line);
+    color: var(--text);
+  }
+  .system-tip { background: #1a2032; color: var(--muted); }
+  .bubble.recalled { background: #1a2032; color: #6b7688; border-color: #2a3346; }
+
+  /* 列表交互 */
+  .contact:hover { background: #1f2638; }
+  .contact.active {
+    background: #1d2b4a;
+    box-shadow: inset 0 0 0 1px rgba(77, 141, 255, 0.28);
+  }
+  .search-clear { background: #2a3346; }
+  .icon-btn { background: #1e2436; border-color: var(--line); color: #a4adbd; }
+  .icon-btn:hover { background: #243150; border-color: #3a4a6e; }
+  .mini { background: #1e2436; border-color: var(--line); color: var(--text); }
+  .mini:hover:not(:disabled) { border-color: #3a4a6e; }
+  .dot { background: #3a4258; }
+
+  /* 文字色 */
+  .brand h1,
+  .me-info strong,
+  .contact-info strong,
+  .conv-header strong,
+  .conv-peer strong { color: #f3f5fb; }
+  .brand p,
+  .me-info span,
+  .contact-info span,
+  .status-text,
+  .preview,
+  .contact-time,
+  .meta,
+  .loading-more,
+  .empty-sub,
+  .admin-role { color: var(--muted); }
+  .empty-title { color: #a4adbd; }
+  .admin-head { border-bottom-color: var(--line); color: #6b7688; }
+  .admin-row:not(.admin-head):hover { background: #1a2032; }
+
+  /* 杂项 */
+  .conn-banner { background: #2a2118; border-color: #4a3a1a; color: #fbbf24; }
+  .notice { background: #1a2540; border-color: #2a3a6e; color: #6d9eff; }
+  .modal-mask { background: rgba(0, 0, 0, 0.55); }
+  .ghost-avatar { background: #1a2032; color: #5a6478; }
+
+  /* 状态图标色 */
+  .meta .status { color: #8b94a8; }
+  .meta .status.sending { color: #d4a93b; }
+  .meta .status.sent { color: #4d9eff; }
+}
+
+/* 补充：暗色下头像底色与分屏 brand 区域文字（hero 仍是品牌色，无需覆盖） */
+@media (prefers-reduced-motion: reduce) {
+  .badge,
+  .auth-hero::before {
+    animation: none !important;
+  }
+}
+

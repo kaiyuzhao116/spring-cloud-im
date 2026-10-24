@@ -930,9 +930,21 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="page">
+  <div class="page" :class="{ 'auth-layout': !profile }">
     <div class="glow glow-a"></div>
     <div class="glow glow-b"></div>
+
+    <!-- 未登录：左品牌区 -->
+    <aside v-if="!profile" class="auth-hero">
+      <div class="auth-hero-logo">IM</div>
+      <h2>微服务通讯平台</h2>
+      <p>Spring Cloud Alibaba · Dubbo · Netty · RocketMQ</p>
+      <ul class="auth-features">
+        <li>单聊 · 好友 · 在线状态</li>
+        <li>消息撤回与离线补发</li>
+        <li>后台用户管理</li>
+      </ul>
+    </aside>
 
     <!-- 未登录 -->
     <main v-if="!profile" class="card">
@@ -945,7 +957,7 @@ onBeforeUnmount(() => {
       </header>
 
       <form class="form" @submit.prevent="mode === 'login' ? handleLogin() : handleRegister()">
-        <label class="field">
+        <label class="field field-account">
           <span>账号</span>
           <input
             v-model="account"
@@ -954,7 +966,7 @@ onBeforeUnmount(() => {
             :placeholder="mode === 'login' ? 'admin / xiaohong / xiaoming …' : '4~20 位字母、数字、下划线'"
           />
         </label>
-        <label class="field">
+        <label class="field field-password">
           <span>密码</span>
           <input
             v-model="password"
@@ -963,7 +975,7 @@ onBeforeUnmount(() => {
             :placeholder="mode === 'login' ? '123456' : '8~20 位，需含字母和数字'"
           />
         </label>
-        <label v-if="mode === 'register'" class="field">
+        <label v-if="mode === 'register'" class="field field-nickname">
           <span>昵称</span>
           <input v-model="nickname" type="text" placeholder="不填就用账号" />
         </label>
@@ -1249,21 +1261,37 @@ onBeforeUnmount(() => {
                   </span>
                   <span v-else>{{ msg.content }}</span>
                 </div>
-                <span class="meta">
+                <span class="meta" v-if="msg.mine">
                   <template v-if="msg.recalled">
-                    <span class="recall-link" v-if="msg.mine">已撤回</span>
+                    <span class="recall-link">已撤回</span>
                   </template>
-                  <template v-else-if="msg.mine">
-                    <span v-if="msg.status === 'sending'">发送中…</span>
-                    <span v-else-if="msg.status === 'failed'" class="failed-text">
-                      {{ msg.failReason || '发送失败，点击气泡重发' }}
+                  <template v-else-if="msg.status === 'sending'">
+                    <span class="status sending" title="发送中">
+                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+                        <circle cx="8" cy="8" r="6.2" />
+                        <path d="M8 4.5V8l2.3 1.4" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                      发送中
                     </span>
-                    <template v-else>
-                      <span>seq {{ msg.seq }}</span>
-                      <span v-if="canRecall(msg)" class="recall-link" @click.stop="recall(msg)">撤回</span>
-                    </template>
                   </template>
-                  <template v-else>seq {{ msg.seq }}</template>
+                  <template v-else-if="msg.status === 'failed'">
+                    <span class="failed-text">
+                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7">
+                        <circle cx="8" cy="8" r="6.2" />
+                        <path d="M8 4.8v3.6" stroke-linecap="round" />
+                        <circle cx="8" cy="11.3" r="0.7" fill="currentColor" stroke="none" />
+                      </svg>
+                      {{ msg.failReason || '发送失败，点击重发' }}
+                    </span>
+                  </template>
+                  <template v-else>
+                    <span class="status sent" title="已送达">
+                      <svg viewBox="0 0 18 13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M2 7.2L6.5 11.5L16 2.5" />
+                      </svg>
+                    </span>
+                    <span v-if="canRecall(msg)" class="recall-link" @click.stop="recall(msg)">撤回</span>
+                  </template>
                 </span>
               </template>
             </div>
