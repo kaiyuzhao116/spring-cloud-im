@@ -12,6 +12,7 @@ import com.song.im.friend.FriendService;
 import com.song.im.mq.FriendEventPublisher;
 import com.song.im.mq.MessageEvent;
 import com.song.im.mq.MessageEventPublisher;
+import com.song.im.outbox.OutboxRelay;
 import com.song.im.outbox.OutboxRepository;
 import com.song.im.repository.MessageRepository;
 import com.song.im.support.PeerNameResolver;
@@ -22,6 +23,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -69,10 +72,12 @@ public class MessageService {
 
     private final OutboxRepository outboxRepository;
 
+    private final OutboxRelay outboxRelay;
+
     public MessageService(MessageRepository messageRepository, SeqGenerator seqGenerator,
                           MessageEventPublisher eventPublisher, PeerNameResolver peerNameResolver,
                           FriendService friendService, FriendEventPublisher friendEventPublisher,
-                          OutboxRepository outboxRepository) {
+                          OutboxRepository outboxRepository, OutboxRelay outboxRelay) {
         this.messageRepository = messageRepository;
         this.seqGenerator = seqGenerator;
         this.eventPublisher = eventPublisher;
@@ -80,6 +85,7 @@ public class MessageService {
         this.friendService = friendService;
         this.friendEventPublisher = friendEventPublisher;
         this.outboxRepository = outboxRepository;
+        this.outboxRelay = outboxRelay;
     }
 
     @Transactional
@@ -127,6 +133,9 @@ public class MessageService {
         // 提交成功 = 消息和待办都在；提交失败 = 两者都不在，不存在"消息在库里但通知永久丢失"。
         writeOutbox(new MessageEvent(msgId, conversationId, seq, fromUid,
                 request.getTo(), request.getContent(), System.currentTimeMillis()));
+
+        // 提交后立刻唤醒投递器，把"最多 1 秒"的延迟压到接近 0
+        wakeUpAfterCommit();
 
         return new SendResult(msgId, seq, conversationId);
     }
@@ -255,6 +264,24 @@ public class MessageService {
         // 通知对端刷新那一条（通知丢了也不影响数据，历史里已带 recalled 标记）
         friendEventPublisher.notifyMessageRecalled(toUid, seq, uid);
         log.info("消息已撤回 conversation={} seq={} uid={}", conversationId, seq, uid);
+    }
+
+    /**
+     * 事务提交后唤醒 Outbox 投递器。
+     *
+     * <p>必须放在 afterCommit：提交前唤醒会扫不到这条待办（还没提交）。</p>
+     */
+    private void wakeUpAfterCommit() {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    outboxRelay.wakeUp();
+                }
+            });
+        } else {
+            outboxRelay.wakeUp();
+        }
     }
 
     /**

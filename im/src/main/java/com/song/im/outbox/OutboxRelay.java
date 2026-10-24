@@ -5,6 +5,7 @@ import com.song.im.mq.MessageEvent;
 import com.song.im.mq.MessageEventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Outbox 投递器：把"待办表"里的事件真正发到 MQ。
@@ -43,9 +45,38 @@ public class OutboxRelay {
 
     private final MessageEventPublisher eventPublisher;
 
-    public OutboxRelay(OutboxRepository outboxRepository, MessageEventPublisher eventPublisher) {
+    private final TaskScheduler taskScheduler;
+
+    /** 合并高频唤醒：同一时刻只排一个"立即执行"任务 */
+    private final AtomicBoolean wokeUp = new AtomicBoolean(false);
+
+    public OutboxRelay(OutboxRepository outboxRepository, MessageEventPublisher eventPublisher,
+                       TaskScheduler taskScheduler) {
         this.outboxRepository = outboxRepository;
         this.eventPublisher = eventPublisher;
+        this.taskScheduler = taskScheduler;
+    }
+
+    /**
+     * 事务提交后立即唤醒一轮投递，不必等下一次定时扫描。
+     *
+     * <p>定时扫表仍在，只是从"主路径"退化为"兜底"：
+     * 唤醒丢了、进程崩过、MQ 恢复后重试，都靠那 1 秒一次的扫描。</p>
+     */
+    public void wakeUp() {
+        if (!wokeUp.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            taskScheduler.schedule(() -> {
+                wokeUp.set(false);
+                relay();
+            }, Instant.now());
+        } catch (Exception e) {
+            // 排不进线程池也无所谓，一秒后的定时任务会兜住
+            wokeUp.set(false);
+            log.debug("唤醒投递失败，交给定时扫描: {}", e.getMessage());
+        }
     }
 
     /** 每秒扫一次；MESSAGE.created 走这里补发 */
