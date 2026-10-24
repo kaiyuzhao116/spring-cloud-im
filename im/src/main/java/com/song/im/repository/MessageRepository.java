@@ -3,6 +3,7 @@ package com.song.im.repository;
 import com.song.im.domain.ConversationItem;
 import com.song.im.domain.MessageItem;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
@@ -113,18 +114,13 @@ public class MessageRepository {
      */
     public List<MessageItem> findBefore(String conversationId, long beforeSeq, int limit) {
         return jdbcTemplate.query("""
-                        SELECT id, seq, from_uid, content, created_at
+                        SELECT id, seq, from_uid, content, recalled, created_at
                         FROM im_message
                         WHERE conversation_id = ? AND seq < ?
                         ORDER BY seq DESC
                         LIMIT ?
                         """,
-                (rs, rowNum) -> new MessageItem(
-                        rs.getLong("id"),
-                        rs.getLong("seq"),
-                        rs.getLong("from_uid"),
-                        rs.getString("content"),
-                        rs.getTimestamp("created_at").getTime()),
+                MESSAGE_ITEM_MAPPER,
                 conversationId, beforeSeq, limit);
     }
 
@@ -135,19 +131,71 @@ public class MessageRepository {
      */
     public List<MessageItem> findAfter(String conversationId, long afterSeq, int limit) {
         return jdbcTemplate.query("""
-                        SELECT id, seq, from_uid, content, created_at
+                        SELECT id, seq, from_uid, content, recalled, created_at
                         FROM im_message
                         WHERE conversation_id = ? AND seq > ?
                         ORDER BY seq ASC
                         LIMIT ?
                         """,
-                (rs, rowNum) -> new MessageItem(
-                        rs.getLong("id"),
+                MESSAGE_ITEM_MAPPER,
+                conversationId, afterSeq, limit);
+    }
+
+    /**
+     * 找一条消息（撤回前校验用）。
+     *
+     * @return 不存在返回 null
+     */
+    public RecallRow findForRecall(String conversationId, long seq) {
+        List<RecallRow> list = jdbcTemplate.query("""
+                        SELECT seq, from_uid, recalled, created_at
+                        FROM im_message
+                        WHERE conversation_id = ? AND seq = ?
+                        """,
+                (rs, rowNum) -> new RecallRow(
                         rs.getLong("seq"),
                         rs.getLong("from_uid"),
-                        rs.getString("content"),
+                        rs.getInt("recalled") == 1,
                         rs.getTimestamp("created_at").getTime()),
-                conversationId, afterSeq, limit);
+                conversationId, seq);
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    /**
+     * 撤回：内容清空 + 打标记。
+     *
+     * <p>{@code from_uid = ?} 放在 SQL 里，从数据库层面杜绝"撤别人的消息"。</p>
+     *
+     * @return 影响行数；0 表示不是本人的消息或不存在
+     */
+    public int markRecalled(String conversationId, long seq, long fromUid) {
+        return jdbcTemplate.update("""
+                        UPDATE im_message
+                        SET recalled = 1, content = ''
+                        WHERE conversation_id = ? AND seq = ? AND from_uid = ? AND recalled = 0
+                        """,
+                conversationId, seq, fromUid);
+    }
+
+    /** 撤回后同步会话卡片的预览（只改"最后一条"是该消息的卡片） */
+    public void updatePreview(String conversationId, long seq, String preview) {
+        jdbcTemplate.update("""
+                        UPDATE im_conversation_member
+                        SET last_msg_preview = ?
+                        WHERE conversation_id = ? AND last_seq = ?
+                        """,
+                preview, conversationId, seq);
+    }
+
+    private static final RowMapper<MessageItem> MESSAGE_ITEM_MAPPER = (rs, rowNum) -> new MessageItem(
+            rs.getLong("id"),
+            rs.getLong("seq"),
+            rs.getLong("from_uid"),
+            rs.getString("content"),
+            rs.getTimestamp("created_at").getTime(),
+            rs.getInt("recalled") == 1);
+
+    public record RecallRow(long seq, long fromUid, boolean recalled, long createdAt) {
     }
 
     /**

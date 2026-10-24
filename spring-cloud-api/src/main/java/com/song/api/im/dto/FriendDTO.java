@@ -17,13 +17,29 @@ public class FriendDTO implements Serializable {
 
     private String remark;
 
+    /** 是否在线（来自 ws-gateway 维护的在线表） */
+    private boolean online;
+
     public FriendDTO() {
     }
 
     public FriendDTO(Long uid, String nickname, String remark) {
+        this(uid, nickname, remark, false);
+    }
+
+    public FriendDTO(Long uid, String nickname, String remark, boolean online) {
         this.uid = uid;
         this.nickname = nickname;
         this.remark = remark;
+        this.online = online;
+    }
+
+    public boolean isOnline() {
+        return online;
+    }
+
+    public void setOnline(boolean online) {
+        this.online = online;
     }
 
     public Long getUid() {

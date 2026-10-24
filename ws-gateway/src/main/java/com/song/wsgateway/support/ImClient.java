@@ -25,4 +25,8 @@ public class ImClient {
         cmd.setContent(content);
         return imMessageFacade.send(cmd);
     }
+
+    public void recall(long fromUid, long toUid, long seq) {
+        imMessageFacade.recall(fromUid, toUid, seq);
+    }
 }

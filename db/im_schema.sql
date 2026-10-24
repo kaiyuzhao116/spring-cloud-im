@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS im_message (
     to_uid          BIGINT       NOT NULL DEFAULT 0 COMMENT '单聊对端；群聊填 0',
     msg_type        TINYINT      NOT NULL DEFAULT 1 COMMENT '1文本 2图片 3语音 4文件',
     content         VARCHAR(2000) NOT NULL DEFAULT '' COMMENT '文本内容或资源URL',
+    recalled        TINYINT      NOT NULL DEFAULT 0 COMMENT '1已撤回（content 会被清空）',
     client_msg_id   VARCHAR(64)  NOT NULL COMMENT '客户端幂等键（必传，UUID）',
     status          TINYINT      NOT NULL DEFAULT 0 COMMENT '0正常 1已撤回',
     created_at      DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '发送时间（毫秒）',

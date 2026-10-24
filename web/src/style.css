@@ -312,6 +312,41 @@ body {
   background: var(--err);
 }
 
+/* 撤回消息：灰字斜体，气泡不再突出 */
+.bubble.recalled {
+  background: #f4f6fa;
+  color: #9aa5b6;
+  font-style: italic;
+  border: 1px dashed #e2e8f2;
+}
+
+.recall-link {
+  margin-left: 6px;
+  color: #98a3b5;
+  cursor: pointer;
+}
+
+.recall-link:hover {
+  color: #3b7cf6;
+  text-decoration: underline;
+}
+
+/* 好友在线状态小圆点 */
+.presence {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: #d3dae6;
+  vertical-align: middle;
+}
+
+.presence.on {
+  background: #22c55e;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.16);
+}
+
 /* 消息时间分隔 */
 .msg-time {
   margin: 6px 0 2px;

@@ -13,6 +13,9 @@ public enum FrameType {
     /** 下行：发送成功确认，回传 cid 并带上 seq */
     ACK,
 
+    /** 上行：撤回自己发出的某条消息 */
+    RECALL,
+
     /** 上行：客户端心跳 */
     PING,
 

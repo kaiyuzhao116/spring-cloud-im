@@ -34,4 +34,9 @@ public class ImMessageFacadeImpl implements ImMessageFacade {
         SendResult result = messageService.send(cmd.getFromUid(), request);
         return new SendResultDTO(result.msgId(), result.seq(), result.conversationId());
     }
+
+    @Override
+    public void recall(long uid, long toUid, long seq) {
+        messageService.recall(uid, toUid, seq);
+    }
 }

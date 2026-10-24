@@ -53,6 +53,9 @@ const searching = ref(false)
 /** 不在底部时收到的新消息条数（点按钮才跳） */
 const unreadNew = ref(0)
 
+/** 好友在线状态的定时刷新 */
+let presenceTimer = null
+
 /** 轻提示（好友申请等），几秒后自动消失 */
 const notice = ref('')
 let noticeTimer = null
@@ -63,6 +66,39 @@ function showNotice(text) {
   noticeTimer = setTimeout(() => {
     notice.value = ''
   }, 5000)
+}
+
+/** 标签页标题显示未读总数，切到别的页面也能看到 */
+function updateTitle() {
+  const total = conversations.value.reduce((sum, c) => sum + (c.unread || 0), 0)
+  document.title = total > 0 ? `(${total > 99 ? '99+' : total}) IM` : 'IM'
+}
+
+function nameOf(uid) {
+  const conv = conversations.value.find((c) => c.peerUid === uid)
+  if (conv) return conv.name
+  const friend = friends.value.find((f) => f.uid === uid)
+  if (friend) return friend.nickname || nicknameOf(uid)
+  return nicknameOf(uid)
+}
+
+/** 页面在后台且有权限时，弹一条系统通知 */
+function notifyDesktop(uid, content) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return
+  if (!document.hidden) return
+  try {
+    new Notification(nameOf(uid), { body: content, tag: 'im-message' })
+  } catch (e) {
+    // 某些浏览器（如未授权的 PWA 环境）会抛，忽略即可
+  }
+}
+
+/** 登录后请求一次通知权限（用户拒绝就不再打扰） */
+function askNotificationPermission() {
+  if (!('Notification' in window)) return
+  if (Notification.permission === 'default') {
+    Notification.requestPermission().catch(() => {})
+  }
 }
 
 /** 每个会话已上报过的最大 seq，避免重复请求 */
@@ -286,6 +322,24 @@ function needTimeDivider(index) {
   return current.ts - prev.ts > TIME_GAP_MS
 }
 
+/** 2 分钟内、自己发的、已成功的消息才能撤回 */
+const RECALL_WINDOW_MS = 2 * 60 * 1000
+
+function canRecall(msg) {
+  return !!(msg.mine && msg.status === 'sent' && msg.seq && !msg.recalled
+    && Date.now() - (msg.ts || 0) < RECALL_WINDOW_MS)
+}
+
+function recall(msg) {
+  if (!canRecall(msg) || !socket) return
+  socket.sendFrame({
+    type: 'RECALL',
+    cid: `r-${Date.now()}`,
+    to: msg.to || peer.value.id,
+    seq: msg.seq
+  })
+}
+
 /** 点击失败的红色气泡：用同一个 cid 重发（服务端幂等，不会重复落库） */
 function resend(msg) {
   if (msg.status !== 'failed' || !socket || !msg.to) return
@@ -307,6 +361,16 @@ function handleFrame(frame) {
       loadFriendRequests()
       loadFriends()
       showNotice(`${frame.content || '对方'} 同意了你的好友申请`)
+    } else if (frame.event === 'message_recalled') {
+      // 对方撤回：content 里放的是 seq
+      const seq = Number(frame.content)
+      const target = messages.value.find((m) => m.seq === seq)
+      if (target) {
+        target.recalled = true
+        target.content = ''
+      }
+      const conv = conversations.value.find((c) => c.peerUid === frame.from)
+      if (conv) conv.preview = '[消息已撤回]'
     }
     return
   }
@@ -362,9 +426,31 @@ function handleFrame(frame) {
     } else {
       loadConversations()   // 新会话（对方第一次发消息给我）
     }
+
+    // 不在这个会话里才值得提醒；正在看的会话已经算已读
+    if (frame.from !== peer.value.id) {
+      notifyDesktop(frame.from, frame.content)
+    }
+    updateTitle()
     return
   }
   if (frame.type === 'ACK') {
+    // 撤回回执：cid 以 r- 开头，成功后把本地那条也标记为已撤回
+    if (frame.cid && frame.cid.startsWith('r-')) {
+      if (!frame.seq) {
+        error.value = frame.reason || '撤回失败'
+        return
+      }
+      const recalled = messages.value.find((m) => m.seq === frame.seq)
+      if (recalled) {
+        recalled.recalled = true
+        recalled.content = ''
+      }
+      const conv = conversations.value.find((c) => c.peerUid === peer.value.id)
+      if (conv) conv.preview = '[消息已撤回]'
+      return
+    }
+
     const target = messages.value.find((m) => m.key === frame.cid)
     if (!target) return
     if (!frame.seq) {
@@ -420,6 +506,7 @@ async function loadHistory() {
       seq: m.seq,
       ts: m.ts,
       from: m.from,
+      recalled: m.recalled,
       status: 'sent'
     }))
     hasMore.value = data.hasMore
@@ -450,6 +537,9 @@ async function loadMore() {
         mine: m.from === profile.value.id,
         content: m.content,
         seq: m.seq,
+        ts: m.ts,
+        from: m.from,
+        recalled: m.recalled,
         status: 'sent'
       }))
 
@@ -547,7 +637,11 @@ async function loadProfile() {
       peer.value = resolvePeer(profile.value)
     }
     await loadHistory()      // 先灌历史，再建连，避免实时消息被历史覆盖
+    updateTitle()
+    askNotificationPermission()
     connect()
+    // 在线状态会过期，60 秒刷新一次好友列表（数据量小，成本可忽略）
+    presenceTimer = setInterval(loadFriends, 60000)
   } catch (e) {
     error.value = e.message
     clearSession()
@@ -645,6 +739,8 @@ async function handleLogout() {
     // 精简版 logout 是空实现，本地清理才是关键
   }
   if (socket) socket.close()
+  if (presenceTimer) clearInterval(presenceTimer)
+  document.title = 'IM'
   clearSession()
   profile.value = null
   messages.value = []
@@ -660,6 +756,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (socket) socket.close()
   if (noticeTimer) clearTimeout(noticeTimer)
+  if (presenceTimer) clearInterval(presenceTimer)
 })
 </script>
 
@@ -782,8 +879,11 @@ onBeforeUnmount(() => {
           >
             <div class="avatar small">{{ (f.nickname || nicknameOf(f.uid)).charAt(0) }}</div>
             <div class="contact-info">
-              <strong>{{ f.nickname || nicknameOf(f.uid) }}</strong>
-              <span class="preview">点我开始聊天</span>
+              <strong>
+                {{ f.nickname || nicknameOf(f.uid) }}
+                <span class="presence" :class="{ on: f.online }" :title="f.online ? '在线' : '离线'"></span>
+              </strong>
+              <span class="preview">{{ f.online ? '在线' : '点我开始聊天' }}</span>
             </div>
           </div>
 
@@ -878,19 +978,28 @@ onBeforeUnmount(() => {
               <template v-else>
                 <div
                   class="bubble"
-                  :class="{ failed: msg.status === 'failed' }"
+                  :class="{ failed: msg.status === 'failed', recalled: msg.recalled }"
                   :title="msg.status === 'failed' ? '点击重发' : ''"
                   @click="resend(msg)"
                 >
-                  {{ msg.content }}
+                  <span v-if="msg.recalled">
+                    {{ msg.mine ? '你撤回了一条消息' : '对方撤回了一条消息' }}
+                  </span>
+                  <span v-else>{{ msg.content }}</span>
                 </div>
                 <span class="meta">
-                  <template v-if="msg.mine">
+                  <template v-if="msg.recalled">
+                    <span class="recall-link" v-if="msg.mine">已撤回</span>
+                  </template>
+                  <template v-else-if="msg.mine">
                     <span v-if="msg.status === 'sending'">发送中…</span>
                     <span v-else-if="msg.status === 'failed'" class="failed-text">
                       {{ msg.failReason || '发送失败，点击气泡重发' }}
                     </span>
-                    <span v-else>seq {{ msg.seq }}</span>
+                    <template v-else>
+                      <span>seq {{ msg.seq }}</span>
+                      <span v-if="canRecall(msg)" class="recall-link" @click.stop="recall(msg)">撤回</span>
+                    </template>
                   </template>
                   <template v-else>seq {{ msg.seq }}</template>
                 </span>

@@ -1,6 +1,7 @@
 package com.song.im.friend;
 
 import com.song.api.im.dto.FriendDTO;
+import com.song.im.support.OnlineQuery;
 import com.song.im.support.PeerNameResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 好友关系业务。
@@ -31,9 +33,13 @@ public class FriendService {
 
     private final PeerNameResolver peerNameResolver;
 
-    public FriendService(FriendRepository friendRepository, PeerNameResolver peerNameResolver) {
+    private final OnlineQuery onlineQuery;
+
+    public FriendService(FriendRepository friendRepository, PeerNameResolver peerNameResolver,
+                         OnlineQuery onlineQuery) {
         this.friendRepository = friendRepository;
         this.peerNameResolver = peerNameResolver;
+        this.onlineQuery = onlineQuery;
     }
 
     /**
@@ -66,17 +72,18 @@ public class FriendService {
         return friendRepository.exists(uid, friendUid);
     }
 
-    /** 好友列表（批量取昵称，避免 N+1 次 RPC） */
+    /** 好友列表（批量取昵称与在线状态，避免 N+1 次 RPC） */
     public List<FriendDTO> friends(long uid) {
         List<Long> ids = friendRepository.friendIds(uid);
         if (ids.isEmpty()) {
             return List.of();
         }
         Map<Long, String> names = peerNameResolver.nicknamesOf(ids);
+        Set<Long> online = onlineQuery.onlineAmong(ids);
 
         List<FriendDTO> result = new ArrayList<>(ids.size());
         for (Long friendUid : ids) {
-            result.add(new FriendDTO(friendUid, names.get(friendUid), null));
+            result.add(new FriendDTO(friendUid, names.get(friendUid), null, online.contains(friendUid)));
         }
         return result;
     }
