@@ -2,6 +2,7 @@ package com.song.wsgateway.handler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.song.api.im.dto.SendResultDTO;
+import com.song.common.BizException;
 import com.song.wsgateway.protocol.Frame;
 import com.song.wsgateway.protocol.FrameType;
 import com.song.wsgateway.session.ChannelAttrs;
@@ -138,8 +139,8 @@ public class BusinessHandler extends SimpleChannelInboundHandler<TextWebSocketFr
             return;
         }
 
-        long seq = persist(ctx, fromUid, in);
-        ackMessage(ctx, in.getCid(), seq);
+        SendOutcome outcome = persist(ctx, fromUid, in);
+        ackMessage(ctx, in.getCid(), outcome);
     }
 
     private boolean hasRequiredFields(Frame in) {
@@ -151,28 +152,50 @@ public class BusinessHandler extends SimpleChannelInboundHandler<TextWebSocketFr
     /**
      * 调用 im 落库。
      *
-     * @return 会话内序号；失败返回 {@link #SEQ_FAILED}
+     * <p>业务拒绝（如"请先添加好友"）和系统故障要区分开：
+     * 前者把 im 的错误码原样带给客户端，后者统一 500。</p>
      */
-    private long persist(ChannelHandlerContext ctx, long fromUid, Frame in) {
+    private SendOutcome persist(ChannelHandlerContext ctx, long fromUid, Frame in) {
         try {
             SendResultDTO result = imClient.send(fromUid, in.getTo(), in.getCid(), in.getContent());
             log.info("消息已落库 msgId={} conversation={} seq={} from={} to={}",
                     result.getMsgId(), result.getConversationId(), result.getSeq(), fromUid, in.getTo());
-            return result.getSeq();
+            return SendOutcome.success(result.getSeq());
+        } catch (BizException e) {
+            // 业务拒绝：不是故障，不需要堆栈
+            log.warn("消息被拒绝 from={} to={} code={} reason={}",
+                    fromUid, in.getTo(), e.getCode(), e.getMessage());
+            return SendOutcome.failure(e.getCode(), e.getMessage());
         } catch (Exception e) {
             log.error("调用 im 失败 from={} to={} cid={}", fromUid, in.getTo(), in.getCid(), e);
-            return SEQ_FAILED;
+            return SendOutcome.failure(500, "服务繁忙，请稍后重试");
         }
     }
 
     /**
-     * 回执：成功带真实 seq，失败带 {@link #SEQ_FAILED}。
+     * 回执：成功带真实 seq，失败带 {@link #SEQ_FAILED} + code/reason。
      *
      * <p>失败也必须回，否则客户端那条消息会一直停在"发送中"。
      * 走 {@link Frame} 序列化，避免 cid 中的特殊字符破坏 JSON。</p>
      */
-    private void ackMessage(ChannelHandlerContext ctx, String cid, long seq) {
-        sendFrame(ctx, Frame.ack(cid, seq));
+    private void ackMessage(ChannelHandlerContext ctx, String cid, SendOutcome outcome) {
+        if (outcome.seq > 0) {
+            sendFrame(ctx, Frame.ack(cid, outcome.seq));
+        } else {
+            sendFrame(ctx, Frame.nack(cid, outcome.code == null ? 500 : outcome.code, outcome.reason));
+        }
+    }
+
+    /** 落库结果：成功带 seq，失败带错误码与原因 */
+    private record SendOutcome(long seq, Integer code, String reason) {
+
+        static SendOutcome success(long seq) {
+            return new SendOutcome(seq, null, null);
+        }
+
+        static SendOutcome failure(int code, String reason) {
+            return new SendOutcome(SEQ_FAILED, code, reason);
+        }
     }
 
     // ==================== 出站工具 ====================

@@ -8,6 +8,7 @@ import com.song.im.domain.MessageItem;
 import com.song.im.domain.PullResult;
 import com.song.im.domain.SendRequest;
 import com.song.im.domain.SendResult;
+import com.song.im.friend.FriendService;
 import com.song.im.mq.MessageEvent;
 import com.song.im.mq.MessageEventPublisher;
 import com.song.im.repository.MessageRepository;
@@ -51,17 +52,26 @@ public class MessageService {
 
     private final PeerNameResolver peerNameResolver;
 
+    private final FriendService friendService;
+
     public MessageService(MessageRepository messageRepository, SeqGenerator seqGenerator,
-                          MessageEventPublisher eventPublisher, PeerNameResolver peerNameResolver) {
+                          MessageEventPublisher eventPublisher, PeerNameResolver peerNameResolver,
+                          FriendService friendService) {
         this.messageRepository = messageRepository;
         this.seqGenerator = seqGenerator;
         this.eventPublisher = eventPublisher;
         this.peerNameResolver = peerNameResolver;
+        this.friendService = friendService;
     }
 
     @Transactional
     public SendResult send(long fromUid, SendRequest request) {
         validate(request);
+
+        // 好友校验：非好友一律拒绝。限制必须在后端，前端隐藏输入框挡不住脚本直连
+        if (!friendService.isFriend(fromUid, request.getTo())) {
+            throw new BizException(403, "请先添加好友再聊天");
+        }
 
         String conversationId = ConversationId.single(fromUid, request.getTo());
 

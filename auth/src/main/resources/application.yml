@@ -33,6 +33,11 @@ spring:
     import:
       - optional:nacos:auth.yaml
 
+# 业务配置
+app:
+  # 新用户注册后自动加这个账号为好友（admin 的 uid）
+  admin-uid: 1
+
 # 认证配置：生产环境请把 secret 移到配置中心/KMS，并改用 RS256
 jwt:
   secret: spring-cloud-im-demo-jwt-secret-key-please-change-in-prod

@@ -1,10 +1,14 @@
 package com.song.im.controller;
 
+import com.song.api.im.dto.FriendDTO;
 import com.song.common.BizException;
 import com.song.common.Result;
 import com.song.common.ResultCode;
 import com.song.common.UserContext;
+import com.song.im.friend.FriendRequestService;
+import com.song.im.friend.FriendService;
 import com.song.im.domain.ConversationItem;
+import com.song.im.domain.FriendRequestItem;
 import com.song.im.domain.PullResult;
 import com.song.im.domain.ReadRequest;
 import com.song.im.domain.SendRequest;
@@ -13,6 +17,7 @@ import com.song.im.service.MessageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -33,8 +38,85 @@ public class ImController {
 
     private final MessageService messageService;
 
-    public ImController(MessageService messageService) {
+    private final FriendService friendService;
+
+    private final FriendRequestService friendRequestService;
+
+    public ImController(MessageService messageService, FriendService friendService,
+                        FriendRequestService friendRequestService) {
         this.messageService = messageService;
+        this.friendService = friendService;
+        this.friendRequestService = friendRequestService;
+    }
+
+    /**
+     * 发起好友申请。
+     *
+     * <p>经网关：{@code POST /api/im/friends/requests}，body {@code {"toUid":3,"message":"我是小王"}}</p>
+     */
+    @PostMapping("/friends/requests")
+    public Result<Void> sendFriendRequest(@RequestBody FriendRequestCommand command,
+                                          @RequestHeader(value = "X-User-Id", required = false) String userIdHeader) {
+        Long userId = resolveUserId(userIdHeader);
+        if (userId == null) {
+            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "缺少身份信息，请通过网关访问");
+        }
+        friendRequestService.send(userId, command.toUid(), command.message());
+        return Result.ok(null);
+    }
+
+    /** 我收到的待处理好友申请 */
+    @GetMapping("/friends/requests")
+    public Result<List<FriendRequestItem>> friendRequests(
+            @RequestHeader(value = "X-User-Id", required = false) String userIdHeader) {
+        Long userId = resolveUserId(userIdHeader);
+        if (userId == null) {
+            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "缺少身份信息，请通过网关访问");
+        }
+        return Result.ok(friendRequestService.incoming(userId, 50));
+    }
+
+    /** 同意好友申请 */
+    @PostMapping("/friends/requests/{id}/accept")
+    public Result<Void> acceptFriendRequest(@PathVariable("id") long id,
+                                            @RequestHeader(value = "X-User-Id", required = false) String userIdHeader) {
+        Long userId = resolveUserId(userIdHeader);
+        if (userId == null) {
+            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "缺少身份信息，请通过网关访问");
+        }
+        friendRequestService.accept(userId, id);
+        return Result.ok(null);
+    }
+
+    /** 拒绝好友申请 */
+    @PostMapping("/friends/requests/{id}/reject")
+    public Result<Void> rejectFriendRequest(@PathVariable("id") long id,
+                                            @RequestHeader(value = "X-User-Id", required = false) String userIdHeader) {
+        Long userId = resolveUserId(userIdHeader);
+        if (userId == null) {
+            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "缺少身份信息，请通过网关访问");
+        }
+        friendRequestService.reject(userId, id);
+        return Result.ok(null);
+    }
+
+    /** 好友申请请求体 */
+    public record FriendRequestCommand(long toUid, String message) {
+    }
+
+    /**
+     * 好友列表（含昵称）。
+     *
+     * <p>经网关：{@code GET /api/im/friends}</p>
+     */
+    @GetMapping("/friends")
+    public Result<List<FriendDTO>> friends(
+            @RequestHeader(value = "X-User-Id", required = false) String userIdHeader) {
+        Long userId = resolveUserId(userIdHeader);
+        if (userId == null) {
+            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "缺少身份信息，请通过网关访问");
+        }
+        return Result.ok(friendService.friends(userId));
     }
 
     @PostMapping("/message")

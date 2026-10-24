@@ -7,6 +7,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 /**
  * 通过 Dubbo 反查用户昵称（会话列表展示用）。
  *
@@ -34,6 +40,29 @@ public class PeerNameResolver {
         } catch (Exception e) {
             log.warn("查询昵称失败 uid={} msg={}", uid, e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * 批量查昵称（一次 RPC + 一条 SQL）。
+     *
+     * <p>会话列表 / 好友列表必须用这个：逐个 {@link #nicknameOf} 是 N+1 次 RPC。</p>
+     */
+    public Map<Long, String> nicknamesOf(Collection<Long> uids) {
+        if (uids == null || uids.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            List<UserDTO> users = userFacade.getByIds(new ArrayList<>(uids));
+            Map<Long, String> result = new HashMap<>(users.size());
+            for (UserDTO user : users) {
+                String name = user.getNickname() != null ? user.getNickname() : user.getAccount();
+                result.put(user.getId(), name);
+            }
+            return result;
+        } catch (Exception e) {
+            log.warn("批量查询昵称失败 size={} msg={}", uids.size(), e.getMessage());
+            return Map.of();
         }
     }
 }

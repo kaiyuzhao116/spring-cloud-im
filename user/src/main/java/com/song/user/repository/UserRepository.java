@@ -48,4 +48,47 @@ public class UserRepository {
         return list.stream().findFirst();
     }
 
+    /**
+     * 创建用户。
+     *
+     * <p>不做"先查后插"：账号唯一性交给 {@code uk_account} 兜底，
+     * 否则并发注册时两个请求都查不到、都通过，最后才在插入时炸。</p>
+     *
+     * @throws org.springframework.dao.DuplicateKeyException 账号已存在
+     */
+    public UserDTO insert(String account, String passwordHash, String nickname) {
+        jdbcTemplate.update("""
+                        INSERT INTO sys_user (account, password_hash, nickname, status)
+                        VALUES (?, ?, ?, 1)
+                        """,
+                account, passwordHash, nickname);
+
+        return findByAccount(account)
+                .orElseThrow(() -> new IllegalStateException("创建用户后查询失败: " + account));
+    }
+
+    /**
+     * 按账号精确查找一个人（加好友用）。
+     *
+     * <p>只做精确匹配：账号唯一索引直接命中，且天然"一对一"——
+     * 前缀模糊会让一个输入框列出几十个人，既慢又容易被用来批量抓用户。</p>
+     */
+    public Optional<UserDTO> findByAccountExact(String account, Long excludeUid) {
+        List<UserDTO> list = jdbcTemplate.query(
+                "SELECT " + COLUMNS + " FROM sys_user WHERE account = ? AND status = 1 AND id <> ? LIMIT 1",
+                ROW_MAPPER, account, excludeUid == null ? -1L : excludeUid);
+        return list.stream().findFirst();
+    }
+
+    /** 批量查询（好友/会话列表填昵称，避免 N+1 次 RPC 与查询） */
+    public List<UserDTO> findByIds(java.util.Collection<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        String placeholders = String.join(",", java.util.Collections.nCopies(ids.size(), "?"));
+        return jdbcTemplate.query(
+                "SELECT " + COLUMNS + " FROM sys_user WHERE id IN (" + placeholders + ")",
+                ROW_MAPPER, ids.toArray());
+    }
+
 }

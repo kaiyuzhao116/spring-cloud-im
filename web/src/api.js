@@ -45,6 +45,40 @@ export function login(payload) {
   return request('/api/auth/login', { method: 'POST', body: payload, auth: false })
 }
 
+/** 注册（成功后直接返回 token，注册即登录） */
+export function register(payload) {
+  return request('/api/auth/register', { method: 'POST', body: payload, auth: false })
+}
+
+/** 好友列表 */
+export function fetchFriends() {
+  return request('/api/im/friends')
+}
+
+/** 搜索用户（按账号/昵称前缀） */
+export function searchUsers(keyword) {
+  const qs = new URLSearchParams({ keyword })
+  return request(`/api/user/search?${qs.toString()}`)
+}
+
+/** 发起好友申请 */
+export function sendFriendRequest(toUid, message = '') {
+  return request('/api/im/friends/requests', { method: 'POST', body: { toUid, message } })
+}
+
+/** 我收到的待处理申请 */
+export function fetchFriendRequests() {
+  return request('/api/im/friends/requests')
+}
+
+export function acceptFriendRequest(id) {
+  return request(`/api/im/friends/requests/${id}/accept`, { method: 'POST' })
+}
+
+export function rejectFriendRequest(id) {
+  return request(`/api/im/friends/requests/${id}/reject`, { method: 'POST' })
+}
+
 export function logout() {
   return request('/api/auth/logout', { method: 'POST' })
 }

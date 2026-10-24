@@ -2,6 +2,7 @@ package com.song.auth.controller;
 
 import com.song.auth.domain.LoginRequest;
 import com.song.auth.domain.LoginResponse;
+import com.song.auth.domain.RegisterRequest;
 import com.song.auth.service.AuthService;
 import com.song.common.Result;
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,6 +27,16 @@ public class AuthController {
     @PostMapping("/login")
     public Result<LoginResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
         return Result.ok(authService.login(request, clientIp(httpRequest), httpRequest.getHeader("User-Agent")));
+    }
+
+    /**
+     * 注册。
+     *
+     * <p>注册成功直接返回 token（注册即登录），并自动与管理员建立好友关系。</p>
+     */
+    @PostMapping("/register")
+    public Result<LoginResponse> register(@RequestBody RegisterRequest request, HttpServletRequest httpRequest) {
+        return Result.ok(authService.register(request, clientIp(httpRequest), httpRequest.getHeader("User-Agent")));
     }
 
     /**

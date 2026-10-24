@@ -40,6 +40,17 @@ public class Frame {
     /** 文本内容（≤2000 字符） */
     private String content;
 
+    /**
+     * ACK 的业务错误码（0 或不填表示成功）。
+     *
+     * <p>只有 {@code seq=0} 时前端才知道"失败了"，加了 code 才能知道"为什么失败"
+     * （403 = 请先添加好友 等）。老客户端不读它也不影响。</p>
+     */
+    private Integer code;
+
+    /** ACK 的错误说明，给人看的一句话 */
+    private String reason;
+
     public Frame() {
     }
 
@@ -60,6 +71,14 @@ public class Frame {
     /** 下行：发送成功确认 */
     public static Frame ack(String cid, Long seq) {
         return new Frame(FrameType.ACK.name(), cid, null, null, seq, null);
+    }
+
+    /** 下行：发送失败确认（带错误码与原因） */
+    public static Frame nack(String cid, int code, String reason) {
+        Frame frame = new Frame(FrameType.ACK.name(), cid, null, null, 0L, null);
+        frame.code = code;
+        frame.reason = reason;
+        return frame;
     }
 
     /** 下行：推给接收方 */
@@ -126,6 +145,22 @@ public class Frame {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    public Integer getCode() {
+        return code;
+    }
+
+    public void setCode(Integer code) {
+        this.code = code;
+    }
+
+    public String getReason() {
+        return reason;
+    }
+
+    public void setReason(String reason) {
+        this.reason = reason;
     }
 
     @Override

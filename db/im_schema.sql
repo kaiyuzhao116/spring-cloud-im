@@ -47,3 +47,36 @@ CREATE TABLE IF NOT EXISTS im_conversation_member (
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci COMMENT = 'IM会话成员表（每人每会话一行）';
+
+-- ============ 好友关系（双向各一行，保证"查我的好友"走索引） ============
+CREATE TABLE IF NOT EXISTS im_friend
+(
+    id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    uid        BIGINT UNSIGNED NOT NULL COMMENT '拥有者',
+    friend_uid BIGINT UNSIGNED NOT NULL COMMENT '好友',
+    remark     VARCHAR(32)              DEFAULT NULL COMMENT '备注名',
+    status     TINYINT         NOT NULL DEFAULT 1 COMMENT '1正常 0已删除',
+    created_at DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_uid_friend (uid, friend_uid),
+    KEY idx_uid_status (uid, status)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci COMMENT ='好友关系（双向各一行）';
+
+-- ============ 好友申请（唯一键防重复申请） ============
+CREATE TABLE IF NOT EXISTS im_friend_request
+(
+    id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    from_uid   BIGINT UNSIGNED NOT NULL,
+    to_uid     BIGINT UNSIGNED NOT NULL,
+    message    VARCHAR(100)             DEFAULT NULL COMMENT '验证消息',
+    status     TINYINT         NOT NULL DEFAULT 0 COMMENT '0待处理 1已同意 2已拒绝',
+    created_at DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    handled_at DATETIME(3)              DEFAULT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_from_to (from_uid, to_uid),
+    KEY idx_to_status (to_uid, status)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci COMMENT ='好友申请';

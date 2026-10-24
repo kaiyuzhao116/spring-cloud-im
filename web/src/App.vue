@@ -1,20 +1,30 @@
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
+  acceptFriendRequest,
   clearSession,
   fetchConversations,
+  fetchFriendRequests,
+  fetchFriends,
   fetchMessages,
   fetchProfile,
   getToken,
   login,
   logout,
   markRead,
+  register,
+  rejectFriendRequest,
+  searchUsers,
+  sendFriendRequest,
   setToken
 } from './api'
 import { ChatSocket } from './ws'
 
+/** login | register */
+const mode = ref('login')
 const account = ref('admin')
 const password = ref('123456')
+const nickname = ref('')
 const loading = ref(false)
 const error = ref('')
 
@@ -27,6 +37,21 @@ const listEl = ref(null)
 
 /** 会话列表（含未读数） */
 const conversations = ref([])
+
+/** 好友列表（来自 im_friend，点一下即可开始聊天） */
+const friends = ref([])
+
+/** 收到的好友申请 */
+const friendRequests = ref([])
+
+/** 加好友弹窗 */
+const showAddFriend = ref(false)
+const keyword = ref('')
+const searchResults = ref([])
+const searching = ref(false)
+
+/** 申请列表轮询（P1 先用轮询，实时推送留到后面） */
+let requestTimer = null
 
 /** 每个会话已上报过的最大 seq，避免重复请求 */
 const readSent = {}
@@ -95,6 +120,96 @@ async function switchPeer(c) {
   await loadHistory()
 }
 
+async function loadFriends() {
+  try {
+    friends.value = await fetchFriends()
+  } catch (e) {
+    console.warn('好友列表加载失败:', e.message)
+  }
+}
+
+async function loadFriendRequests() {
+  try {
+    friendRequests.value = await fetchFriendRequests()
+  } catch (e) {
+    console.warn('好友申请加载失败:', e.message)
+  }
+}
+
+/** 搜索用户（账号/昵称前缀） */
+async function doSearch() {
+  const kw = keyword.value.trim()
+  if (!kw) {
+    searchResults.value = []
+    return
+  }
+  searching.value = true
+  try {
+    searchResults.value = (await searchUsers(kw)).map((u) => ({ ...u, added: false }))
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    searching.value = false
+  }
+}
+
+async function addFriend(u) {
+  try {
+    await sendFriendRequest(u.id, `我是${profile.value.nickname || profile.value.account}`)
+    u.added = true
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function acceptRequest(r) {
+  try {
+    await acceptFriendRequest(r.id)
+    await Promise.all([loadFriendRequests(), loadFriends()])
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function rejectRequest(r) {
+  try {
+    await rejectFriendRequest(r.id)
+    await loadFriendRequests()
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+function openAddFriend() {
+  showAddFriend.value = true
+  keyword.value = ''
+  searchResults.value = []
+}
+
+function startRequestPolling() {
+  stopRequestPolling()
+  // 20 秒拉一次申请；P2 会换成 MQ 实时推送
+  requestTimer = setInterval(loadFriendRequests, 20000)
+}
+
+function stopRequestPolling() {
+  if (requestTimer) {
+    clearInterval(requestTimer)
+    requestTimer = null
+  }
+}
+
+/** 从好友列表点开聊天（可能还没有任何会话，历史为空） */
+async function openFriend(f) {
+  const name = f.nickname || nicknameOf(f.uid)
+  if (f.uid === peer.value.id) return
+
+  peer.value = { id: f.uid, name }
+  messages.value = []
+  hasMore.value = false
+  await loadHistory()
+}
+
 function scrollToBottom() {
   nextTick(() => {
     if (listEl.value) {
@@ -160,8 +275,9 @@ function handleFrame(frame) {
     const target = messages.value.find((m) => m.key === frame.cid)
     if (!target) return
     if (!frame.seq) {
-      // seq=0 表示服务端没存成：转成"发送失败"，不要让用户以为还在发
+      // seq=0 表示服务端没存成：转成"发送失败"，并把服务端给的原因带出来
       target.status = 'failed'
+      target.failReason = frame.reason || ''
       return
     }
     target.seq = frame.seq
@@ -325,11 +441,19 @@ async function catchUp() {
 async function loadProfile() {
   try {
     profile.value = await fetchProfile()
-    await loadConversations()
+    await Promise.all([loadConversations(), loadFriends(), loadFriendRequests()])
     const first = conversations.value[0]
-    peer.value = first ? { id: first.peerUid, name: first.name } : resolvePeer(profile.value)
+    const firstFriend = friends.value[0]
+    if (first) {
+      peer.value = { id: first.peerUid, name: first.name }
+    } else if (firstFriend) {
+      peer.value = { id: firstFriend.uid, name: firstFriend.nickname || nicknameOf(firstFriend.uid) }
+    } else {
+      peer.value = resolvePeer(profile.value)
+    }
     await loadHistory()      // 先灌历史，再建连，避免实时消息被历史覆盖
     connect()
+    startRequestPolling()
   } catch (e) {
     error.value = e.message
     clearSession()
@@ -351,6 +475,32 @@ async function handleLogin() {
     })
     setToken(data.accessToken)
     messages.value = []
+    await loadProfile()
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    loading.value = false
+  }
+}
+
+/** 注册：成功后后端直接给 token，等于顺便登录 */
+async function handleRegister() {
+  error.value = ''
+  if (!account.value.trim() || !password.value) {
+    error.value = '请输入账号和密码'
+    return
+  }
+  loading.value = true
+  try {
+    const data = await register({
+      account: account.value.trim(),
+      password: password.value,
+      nickname: nickname.value.trim() || undefined,
+      deviceType: 'WEB'
+    })
+    setToken(data.accessToken)
+    messages.value = []
+    mode.value = 'login'
     await loadProfile()
   } catch (e) {
     error.value = e.message
@@ -390,6 +540,7 @@ async function handleLogout() {
     // 精简版 logout 是空实现，本地清理才是关键
   }
   if (socket) socket.close()
+  stopRequestPolling()
   clearSession()
   profile.value = null
   messages.value = []
@@ -404,6 +555,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (socket) socket.close()
+  stopRequestPolling()
 })
 </script>
 
@@ -422,30 +574,45 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <form class="form" @submit.prevent="handleLogin">
+      <form class="form" @submit.prevent="mode === 'login' ? handleLogin() : handleRegister()">
         <label class="field">
           <span>账号</span>
           <input
             v-model="account"
             type="text"
             autocomplete="username"
-            placeholder="admin / xiaohong / xiaoming / xiaogang …"
+            :placeholder="mode === 'login' ? 'admin / xiaohong / xiaoming …' : '4~20 位字母、数字、下划线'"
           />
         </label>
         <label class="field">
           <span>密码</span>
-          <input v-model="password" type="password" autocomplete="current-password" placeholder="123456" />
+          <input
+            v-model="password"
+            type="password"
+            :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
+            :placeholder="mode === 'login' ? '123456' : '8~20 位，需含字母和数字'"
+          />
+        </label>
+        <label v-if="mode === 'register'" class="field">
+          <span>昵称</span>
+          <input v-model="nickname" type="text" placeholder="不填就用账号" />
         </label>
 
         <p v-if="error" class="error">{{ error }}</p>
 
         <button class="primary" type="submit" :disabled="loading">
-          {{ loading ? '登录中…' : '登录' }}
+          {{ loading ? (mode === 'login' ? '登录中…' : '注册中…') : mode === 'login' ? '登录' : '注册并登录' }}
         </button>
+
         <p class="hint">
-          多开几个标签页登录不同账号（密码都是 123456）即可互相聊天：<br />
-          admin / xiaohong / xiaoming / xiaogang / xiaoli / xiaowang
+          <a class="switch-mode" href="#" @click.prevent="mode = mode === 'login' ? 'register' : 'login'">
+            {{ mode === 'login' ? '还没有账号？去注册' : '已有账号？去登录' }}
+          </a>
         </p>
+        <p v-if="mode === 'login'" class="hint">
+          多开几个标签页登录不同账号即可互相聊天（演示账号密码都是 123456）
+        </p>
+        <p v-else class="hint">注册成功后自动与管理员成为好友，可直接找管理员聊天</p>
       </form>
     </main>
 
@@ -461,6 +628,26 @@ onBeforeUnmount(() => {
           <i class="dot" :class="status"></i>
         </div>
 
+        <button class="ghost add-friend" type="button" @click="openAddFriend">＋ 添加好友</button>
+
+        <!-- 好友申请（有待处理时才显示） -->
+        <template v-if="friendRequests.length > 0">
+          <p class="section-title">好友申请（{{ friendRequests.length }}）</p>
+          <div class="request-list">
+            <div v-for="r in friendRequests" :key="r.id" class="request-item">
+              <div class="request-info">
+                <strong>{{ r.fromName || '用户' + r.fromUid }}</strong>
+                <span>{{ r.message || '请求添加你为好友' }}</span>
+              </div>
+              <div class="request-actions">
+                <button type="button" class="mini primary-mini" @click="acceptRequest(r)">同意</button>
+                <button type="button" class="mini" @click="rejectRequest(r)">拒绝</button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <p class="section-title">消息</p>
         <div class="contact-list">
           <div
             v-for="c in conversations"
@@ -480,8 +667,71 @@ onBeforeUnmount(() => {
           <p v-if="conversations.length === 0" class="contact-empty">还没有会话</p>
         </div>
 
+        <p class="section-title">好友</p>
+        <div class="contact-list">
+          <div
+            v-for="f in friends"
+            :key="f.uid"
+            class="contact"
+            :class="{ active: f.uid === peer.id }"
+            @click="openFriend(f)"
+          >
+            <div class="avatar small">{{ (f.nickname || nicknameOf(f.uid)).charAt(0) }}</div>
+            <div class="contact-info">
+              <strong>{{ f.nickname || nicknameOf(f.uid) }}</strong>
+              <span class="preview">点我开始聊天</span>
+            </div>
+          </div>
+
+          <p v-if="friends.length === 0" class="contact-empty">还没有好友（注册后会自动加管理员）</p>
+        </div>
+
         <button class="ghost logout" type="button" @click="handleLogout">退出登录</button>
       </aside>
+
+      <!-- 加好友弹窗 -->
+      <div v-if="showAddFriend" class="modal-mask" @click.self="showAddFriend = false">
+        <div class="modal">
+          <header class="modal-header">
+            <strong>添加好友</strong>
+            <button type="button" class="mini" @click="showAddFriend = false">关闭</button>
+          </header>
+
+          <div class="modal-search">
+            <input
+              v-model="keyword"
+              type="text"
+              placeholder="输入对方完整账号（如 xiaoming）"
+              @keyup.enter="doSearch"
+            />
+            <button type="button" class="primary" :disabled="searching" @click="doSearch">
+              {{ searching ? '搜索中…' : '搜索' }}
+            </button>
+          </div>
+
+          <div class="modal-results">
+            <div v-for="u in searchResults" :key="u.id" class="result-item">
+              <div class="avatar small">{{ (u.nickname || u.account).charAt(0) }}</div>
+              <div class="result-info">
+                <strong>{{ u.nickname }}</strong>
+                <span>@{{ u.account }} · uid {{ u.id }}</span>
+              </div>
+              <button
+                type="button"
+                class="mini primary-mini"
+                :disabled="u.added"
+                @click="addFriend(u)"
+              >
+                {{ u.added ? '已发送' : '加好友' }}
+              </button>
+            </div>
+
+            <p v-if="searchResults.length === 0" class="contact-empty">
+              只能按完整账号精确查找，搜不到就是没有这个人
+            </p>
+          </div>
+        </div>
+      </div>
 
       <section class="conversation">
         <header class="conv-header">
@@ -520,7 +770,9 @@ onBeforeUnmount(() => {
             <span class="meta">
               <template v-if="msg.mine">
                 <span v-if="msg.status === 'sending'">发送中…</span>
-                <span v-else-if="msg.status === 'failed'" class="failed-text">发送失败，请重发</span>
+                <span v-else-if="msg.status === 'failed'" class="failed-text">
+                  {{ msg.failReason || '发送失败，请重发' }}
+                </span>
                 <span v-else>seq {{ msg.seq }}</span>
               </template>
               <template v-else>seq {{ msg.seq }}</template>
