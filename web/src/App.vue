@@ -50,8 +50,17 @@ const keyword = ref('')
 const searchResults = ref([])
 const searching = ref(false)
 
-/** 申请列表轮询（P1 先用轮询，实时推送留到后面） */
-let requestTimer = null
+/** 轻提示（好友申请等），几秒后自动消失 */
+const notice = ref('')
+let noticeTimer = null
+
+function showNotice(text) {
+  notice.value = text
+  if (noticeTimer) clearTimeout(noticeTimer)
+  noticeTimer = setTimeout(() => {
+    notice.value = ''
+  }, 5000)
+}
 
 /** 每个会话已上报过的最大 seq，避免重复请求 */
 const readSent = {}
@@ -186,17 +195,10 @@ function openAddFriend() {
   searchResults.value = []
 }
 
-function startRequestPolling() {
-  stopRequestPolling()
-  // 20 秒拉一次申请；P2 会换成 MQ 实时推送
-  requestTimer = setInterval(loadFriendRequests, 20000)
-}
-
-function stopRequestPolling() {
-  if (requestTimer) {
-    clearInterval(requestTimer)
-    requestTimer = null
-  }
+/** 连接建立/重连时刷新一次好友与申请（实时通知之外的兜底） */
+function refreshSocial() {
+  loadFriends()
+  loadFriendRequests()
 }
 
 /** 从好友列表点开聊天（可能还没有任何会话，历史为空） */
@@ -230,6 +232,19 @@ function pushMessage(item, toBottom = true) {
 }
 
 function handleFrame(frame) {
+  // 服务端主动通知：好友申请、对方同意
+  if (frame.type === 'NOTIFY') {
+    if (frame.event === 'friend_request') {
+      loadFriendRequests()
+      showNotice(`${frame.content || '有人'} 请求添加你为好友`)
+    } else if (frame.event === 'friend_accepted') {
+      loadFriendRequests()
+      loadFriends()
+      showNotice(`${frame.content || '对方'} 同意了你的好友申请`)
+    }
+    return
+  }
+
   if (frame.type === 'MSG') {
     // from=0 是系统消息（欢迎、通知…），居中展示，不属于任何会话
     if (frame.from === 0) {
@@ -302,6 +317,7 @@ function connect() {
           catchUp()
         }
         everConnected = true
+        refreshSocial()   // 断线期间可能错过好友通知，连上后补一次
       }
     }
   })
@@ -453,7 +469,6 @@ async function loadProfile() {
     }
     await loadHistory()      // 先灌历史，再建连，避免实时消息被历史覆盖
     connect()
-    startRequestPolling()
   } catch (e) {
     error.value = e.message
     clearSession()
@@ -540,7 +555,6 @@ async function handleLogout() {
     // 精简版 logout 是空实现，本地清理才是关键
   }
   if (socket) socket.close()
-  stopRequestPolling()
   clearSession()
   profile.value = null
   messages.value = []
@@ -555,7 +569,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (socket) socket.close()
-  stopRequestPolling()
+  if (noticeTimer) clearTimeout(noticeTimer)
 })
 </script>
 
@@ -782,6 +796,7 @@ onBeforeUnmount(() => {
         </div>
 
         <footer class="composer">
+          <p v-if="notice" class="notice">{{ notice }}</p>
           <p v-if="error" class="error">{{ error }}</p>
           <div class="composer-row">
             <input

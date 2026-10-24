@@ -35,6 +35,9 @@ public class RabbitMqConfig {
 
     public static final String ROUTING_KEY_KICK = "ws.kick";
 
+    /** 业务通知（好友申请、同意等） */
+    public static final String ROUTING_KEY_NOTIFY = "ws.notify";
+
     // ==================== 新消息推送 ====================
 
     @Bean
@@ -70,5 +73,18 @@ public class RabbitMqConfig {
     public Binding kickBinding(@Qualifier("kickQueue") Queue kickQueue,
                                @Qualifier("wsEventsExchange") TopicExchange wsEventsExchange) {
         return BindingBuilder.bind(kickQueue).to(wsEventsExchange).with(ROUTING_KEY_KICK);
+    }
+
+    // ==================== 业务通知（好友申请等） ====================
+
+    @Bean
+    public Queue notifyQueue() {
+        return QueueBuilder.nonDurable().exclusive().autoDelete().build();
+    }
+
+    @Bean
+    public Binding notifyBinding(@Qualifier("notifyQueue") Queue notifyQueue,
+                                 @Qualifier("wsEventsExchange") TopicExchange wsEventsExchange) {
+        return BindingBuilder.bind(notifyQueue).to(wsEventsExchange).with(ROUTING_KEY_NOTIFY);
     }
 }

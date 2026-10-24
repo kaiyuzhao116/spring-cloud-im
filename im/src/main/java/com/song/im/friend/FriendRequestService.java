@@ -3,6 +3,7 @@ package com.song.im.friend;
 import com.song.common.BizException;
 import com.song.common.ResultCode;
 import com.song.im.domain.FriendRequestItem;
+import com.song.im.mq.FriendEventPublisher;
 import com.song.im.support.PeerNameResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,12 +37,16 @@ public class FriendRequestService {
 
     private final PeerNameResolver peerNameResolver;
 
+    private final FriendEventPublisher eventPublisher;
+
     public FriendRequestService(FriendRequestRepository requestRepository,
                                 FriendService friendService,
-                                PeerNameResolver peerNameResolver) {
+                                PeerNameResolver peerNameResolver,
+                                FriendEventPublisher eventPublisher) {
         this.requestRepository = requestRepository;
         this.friendService = friendService;
         this.peerNameResolver = peerNameResolver;
+        this.eventPublisher = eventPublisher;
     }
 
     public void send(long fromUid, long toUid, String message) {
@@ -62,6 +67,9 @@ public class FriendRequestService {
 
         requestRepository.upsertPending(fromUid, toUid, msg);
         log.info("好友申请 from={} to={}", fromUid, toUid);
+
+        // 实时通知对方（对方不在线就丢了，靠下次刷新兜底）
+        eventPublisher.notifyRequest(fromUid, peerNameResolver.nicknameOf(fromUid), toUid);
     }
 
     /** 我收到的待处理申请（含申请人昵称） */
@@ -92,6 +100,9 @@ public class FriendRequestService {
         requestRepository.markHandled(requestId, uid, 1);
         friendService.ensure(row.fromUid(), uid);
         log.info("同意好友申请 requestId={} from={} to={}", requestId, row.fromUid(), uid);
+
+        // 通知申请人"对方同意了"
+        eventPublisher.notifyAccepted(uid, peerNameResolver.nicknameOf(uid), row.fromUid());
     }
 
     public void reject(long uid, long requestId) {

@@ -51,6 +51,9 @@ public class Frame {
     /** ACK 的错误说明，给人看的一句话 */
     private String reason;
 
+    /** NOTIFY 的事件名（friend_request / friend_accepted） */
+    private String event;
+
     public Frame() {
     }
 
@@ -92,6 +95,19 @@ public class Frame {
 
     public static Frame pong() {
         return new Frame(FrameType.PONG.name(), null, null, null, null, null);
+    }
+
+    /**
+     * 下行：业务通知。
+     *
+     * @param event   事件名（friend_request / friend_accepted）
+     * @param from    触发者的 uid
+     * @param content 展示用的名字（前端可直接提示）
+     */
+    public static Frame notify(String event, Long from, String content) {
+        Frame frame = new Frame(FrameType.NOTIFY.name(), null, null, from, null, content);
+        frame.event = event;
+        return frame;
     }
 
     /** 解析类型，未知返回 null */
@@ -161,6 +177,14 @@ public class Frame {
 
     public void setReason(String reason) {
         this.reason = reason;
+    }
+
+    public String getEvent() {
+        return event;
+    }
+
+    public void setEvent(String event) {
+        this.event = event;
     }
 
     @Override
