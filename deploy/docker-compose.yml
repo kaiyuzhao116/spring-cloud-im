@@ -1,50 +1,14 @@
+# 目标环境：腾讯云轻量 82.157.185.69（3.6G 内存，已有中间件）
+#
+# 复用已有容器（不重复起，省约 600M 内存）：
+#   campus-mysql    127.0.0.1:3306  root/123456   （库 spring_cloud 已建好）
+#   campus-redis    127.0.0.1:6379  无密码
+#   campus-rabbitmq 127.0.0.1:5672  admin/123456
+#
+# 本文件只起：nacos + 5 个业务服务 + nginx
+# 端口：nginx 8081（对外）、gateway 18080（8080 被 campus-api 占用）、其余默认
+
 services:
-  # ==================== 中间件 ====================
-
-  mysql:
-    image: mysql:8.0
-    container_name: im-mysql
-    network_mode: host
-    restart: always
-    environment:
-      MYSQL_ROOT_PASSWORD: "123456"
-      TZ: Asia/Shanghai
-    command:
-      - --character-set-server=utf8mb4
-      - --collation-server=utf8mb4_general_ci
-      - --default-time-zone=+08:00
-    volumes:
-      - ./data/mysql:/var/lib/mysql
-      # 首次启动自动建表（已存在数据目录时不会重复执行）
-      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      - ./db/im_schema.sql:/docker-entrypoint-initdb.d/02-im_schema.sql:ro
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p123456"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-
-  redis:
-    image: redis:7-alpine
-    container_name: im-redis
-    network_mode: host
-    restart: always
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
-    volumes:
-      - ./data/redis:/data
-
-  rabbitmq:
-    image: rabbitmq:3.13-management-alpine
-    container_name: im-rabbitmq
-    network_mode: host
-    restart: always
-    environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
-    volumes:
-      - ./data/rabbitmq:/var/lib/rabbitmq
-    # ⚠️ 如果服务器上已有 RabbitMQ 占用 5672/15672，先看 deploy.md「复用已有中间件」
-
   nacos:
     image: nacos/nacos-server:v2.2.3
     container_name: im-nacos
@@ -53,13 +17,16 @@ services:
     environment:
       MODE: standalone
       NACOS_AUTH_ENABLE: "false"
-      JVM_XMS: 256m
-      JVM_XMX: 512m
+      JVM_XMS: 128m
+      JVM_XMX: 256m
+      JVM_XMN: 128m
     volumes:
       - ./data/nacos/logs:/home/nacos/logs
-
-  # ==================== 业务服务 ====================
-  # 全部使用 host 网络：配置里的 127.0.0.1 不需要改一个字
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8848/nacos/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
 
   user:
     image: eclipse-temurin:21-jre
@@ -67,11 +34,11 @@ services:
     network_mode: host
     restart: always
     depends_on:
-      mysql:
+      nacos:
         condition: service_healthy
     volumes:
       - ./jars/user.jar:/app.jar:ro
-    command: ["java", "-Xms128m", "-Xmx256m", "-Duser.timezone=Asia/Shanghai", "-jar", "/app.jar"]
+    command: ["java", "-Xms128m", "-Xmx192m", "-XX:MaxMetaspaceSize=128m", "-Duser.timezone=Asia/Shanghai", "-jar", "/app.jar"]
 
   auth:
     image: eclipse-temurin:21-jre
@@ -80,10 +47,9 @@ services:
     restart: always
     depends_on:
       - user
-      - redis
     volumes:
       - ./jars/auth.jar:/app.jar:ro
-    command: ["java", "-Xms128m", "-Xmx256m", "-Duser.timezone=Asia/Shanghai", "-jar", "/app.jar"]
+    command: ["java", "-Xms128m", "-Xmx192m", "-XX:MaxMetaspaceSize=128m", "-Duser.timezone=Asia/Shanghai", "-jar", "/app.jar"]
 
   im:
     image: eclipse-temurin:21-jre
@@ -92,11 +58,13 @@ services:
     restart: always
     depends_on:
       - user
-      - redis
-      - rabbitmq
     volumes:
       - ./jars/im.jar:/app.jar:ro
-    command: ["java", "-Xms192m", "-Xmx384m", "-Duser.timezone=Asia/Shanghai", "-jar", "/app.jar"]
+    environment:
+      # 复用已有 RabbitMQ（账号不是 guest）
+      SPRING_RABBITMQ_USERNAME: admin
+      SPRING_RABBITMQ_PASSWORD: "123456"
+    command: ["java", "-Xms192m", "-Xmx320m", "-XX:MaxMetaspaceSize=160m", "-Duser.timezone=Asia/Shanghai", "-jar", "/app.jar"]
 
   api-gateway:
     image: eclipse-temurin:21-jre
@@ -108,7 +76,8 @@ services:
       - im
     volumes:
       - ./jars/api-gateway.jar:/app.jar:ro
-    command: ["java", "-Xms128m", "-Xmx256m", "-Duser.timezone=Asia/Shanghai", "-jar", "/app.jar"]
+    # 8080 已被 campus-api 占用，网关改用 18080（nginx 已指向它）
+    command: ["java", "-Xms128m", "-Xmx256m", "-XX:MaxMetaspaceSize=128m", "-Duser.timezone=Asia/Shanghai", "-jar", "/app.jar", "--server.port=18080"]
 
   ws-gateway:
     image: eclipse-temurin:21-jre
@@ -117,16 +86,12 @@ services:
     restart: always
     depends_on:
       - im
-      - redis
-      - rabbitmq
     volumes:
       - ./jars/ws-gateway.jar:/app.jar:ro
-    command: ["java", "-Xms128m", "-Xmx256m", "-Duser.timezone=Asia/Shanghai", "-jar", "/app.jar"]
-
-  # ==================== 前端 ====================
-  # 只用它对外：82.157.185.69:8081
-  # /api  → 127.0.0.1:8080（网关）
-  # /ws   → 127.0.0.1:8089（WebSocket）
+    environment:
+      SPRING_RABBITMQ_USERNAME: admin
+      SPRING_RABBITMQ_PASSWORD: "123456"
+    command: ["java", "-Xms128m", "-Xmx256m", "-XX:MaxMetaspaceSize=128m", "-Duser.timezone=Asia/Shanghai", "-jar", "/app.jar"]
 
   web:
     image: nginx:1.27-alpine

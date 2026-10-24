@@ -24,8 +24,9 @@ CREATE TABLE IF NOT EXISTS `sys_user`
   DEFAULT CHARSET = utf8mb4 COMMENT = '用户表';
 
 -- 测试账号：admin / 123456（BCrypt cost 10）
-INSERT IGNORE INTO `sys_user` (`account`, `password_hash`, `nickname`, `status`)
-VALUES ('admin', '$2a$10$oAhOz9YQMsvL.KtOPixjSeN7wWLO66v7A999pdZBsv5uJtA.hxLo6', '管理员', 1);
+-- role=admin 才能进后台管理，别漏了
+INSERT IGNORE INTO `sys_user` (`account`, `password_hash`, `nickname`, `role`, `status`)
+VALUES ('admin', '$2a$10$oAhOz9YQMsvL.KtOPixjSeN7wWLO66v7A999pdZBsv5uJtA.hxLo6', '管理员', 'admin', 1);
 
 -- 本地联调用的多账号（密码都是 123456，哈希与 admin 相同）
 INSERT IGNORE INTO `sys_user` (`account`, `password_hash`, `nickname`, `status`)
