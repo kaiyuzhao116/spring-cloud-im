@@ -11,6 +11,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -31,6 +33,9 @@ public class ChannelManager {
 
     /** WebSocket 关闭码：同账号在别处登录（客户端据此判断"不要重连"） */
     private static final int CLOSE_KICKED = 4001;
+
+    /** 每条连接最多记录多少个会话的已推 seq（LRU 淘汰） */
+    private static final int MAX_TRACKED_CONVS = 500;
 
     private final Map<String, Channel> channels = new ConcurrentHashMap<>();
 
@@ -120,7 +125,74 @@ public class ChannelManager {
     }
 
     /**
-     * 推给某个用户的全部在线连接（多端）。
+     * 推一条聊天消息，<b>带幂等</b>：同一会话里 seq 不大于已推值的直接跳过。
+     *
+     * <p>为什么需要：Outbox 是"至少一次"投递，MQ 重投或"发成功但标记失败"
+     * 都会让同一条事件被处理两次。没有这一层，客户端会收到重复帧，
+     * 未读数被多 +1（气泡有前端 seq 去重挡着，未读没有）。</p>
+     *
+     * <p>只有真正写成功才更新已推 seq：写失败（连接不可写）当作没推过，
+     * 后续补推不会被自己的记录挡住。</p>
+     *
+     * @return 实际推送的连接数
+     */
+    public int pushMessageOnce(long toUid, long fromUid, long seq, Frame frame) {
+        Set<Channel> targets = userChannels.get(toUid);
+        if (targets == null || targets.isEmpty()) {
+            return 0;
+        }
+
+        String json;
+        try {
+            json = MAPPER.writeValueAsString(frame);
+        } catch (Exception e) {
+            log.warn("推送帧序列化失败: {}", e.getMessage());
+            return 0;
+        }
+
+        int pushed = 0;
+        for (Channel channel : targets) {
+            if (!channel.isActive() || !channel.isWritable()) {
+                continue;
+            }
+
+            Map<Long, Long> pushedSeq = pushedSeqOf(channel);
+            synchronized (pushedSeq) {
+                Long last = pushedSeq.get(fromUid);
+                if (last != null && seq <= last) {
+                    log.debug("跳过重复推送 to={} from={} seq={} 已推={}", toUid, fromUid, seq, last);
+                    continue;
+                }
+                channel.writeAndFlush(new TextWebSocketFrame(json));
+                pushedSeq.put(fromUid, seq);
+                pushed++;
+            }
+        }
+        return pushed;
+    }
+
+    /** 每条连接一份"已推 seq"，用 LRU 限制条目数，防止会话多了内存无界 */
+    private Map<Long, Long> pushedSeqOf(Channel channel) {
+        Map<Long, Long> map = channel.attr(ChannelAttrs.PUSHED_SEQ).get();
+        if (map != null) {
+            return map;
+        }
+
+        Map<Long, Long> created = Collections.synchronizedMap(
+                new LinkedHashMap<>(16, 0.75f, true) {
+                    @Override
+                    protected boolean removeEldestEntry(Map.Entry<Long, Long> eldest) {
+                        return size() > MAX_TRACKED_CONVS;
+                    }
+                });
+        Map<Long, Long> existing = channel.attr(ChannelAttrs.PUSHED_SEQ).setIfAbsent(created);
+        return existing != null ? existing : created;
+    }
+
+    /**
+     * 推给某个用户的全部在线连接（多端），不做幂等判断。
+     *
+     * <p>用于 NOTIFY 这类不携带 seq 的帧。</p>
      *
      * @return 实际推送的连接数，0 表示用户不在线
      */

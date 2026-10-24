@@ -37,7 +37,10 @@ public class MessagePushListener {
             long seq = node.path("seq").asLong();
             String content = node.path("content").asText("");
 
-            int online = channelManager.pushToUser(toUid, Frame.down(fromUid, seq, content));
+            // pushMessageOnce：按 (连接, 会话) 的已推 seq 做幂等，
+            // 吸收 Outbox"至少一次"带来的重复投递
+            int online = channelManager.pushMessageOnce(toUid, fromUid, seq,
+                    Frame.down(fromUid, seq, content));
             log.info("推送消息 to={} from={} seq={} 命中连接数={}", toUid, fromUid, seq, online);
         } catch (Exception e) {
             log.warn("推送事件处理失败: {}", e.getMessage());

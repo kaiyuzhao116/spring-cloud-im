@@ -29,6 +29,17 @@ public final class ChannelAttrs {
      */
     public static final AttributeKey<Long> CONNECT_TIME = AttributeKey.valueOf("connectTime");
 
+    /**
+     * 每条连接已推送到的 seq：{@code fromUid -> 该会话最大已推 seq}。
+     *
+     * <p>用来吸收 Outbox "至少一次"投递带来的重复：同一条消息推两次时，
+     * 第二次的 seq 不会大于已推值，直接跳过。</p>
+     *
+     * <p>单聊里 {@code fromUid} 唯一确定一个会话，所以不需要再做会话 ID 拼接。</p>
+     */
+    public static final AttributeKey<java.util.Map<Long, Long>> PUSHED_SEQ =
+            AttributeKey.valueOf("pushedSeq");
+
     private ChannelAttrs() {
     }
 }
