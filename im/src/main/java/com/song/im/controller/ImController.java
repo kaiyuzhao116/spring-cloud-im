@@ -15,8 +15,7 @@ import com.song.im.domain.ConversationItem;
 import com.song.im.domain.FriendRequestItem;
 import com.song.im.domain.PullResult;
 import com.song.im.domain.ReadRequest;
-import com.song.im.domain.SendRequest;
-import com.song.im.domain.SendResult;
+
 import com.song.im.service.MessageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -203,16 +202,14 @@ public class ImController {
         return Result.ok(friendService.friends(userId));
     }
 
-    @PostMapping("/message")
-    public Result<SendResult> send(@RequestBody SendRequest request,
-                                   @RequestHeader(value = "X-User-Id", required = false) String userIdHeader) {
-        Long fromUid = resolveUserId(userIdHeader);
-        if (fromUid == null) {
-            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "缺少身份信息，请通过网关访问");
-        }
-        log.info("收到发消息请求 from={} to={} cid={}", fromUid, request.getTo(), request.getCid());
-        return Result.ok(messageService.send(fromUid, request));
-    }
+    /*
+     * 曾经有一个 POST /message，用于 HTTP 直接发消息（调试用）。
+     * 已移除，原因：
+     *   ① 业务上没有任何调用方——前端走 WebSocket，ws-gateway 走 Dubbo
+     *   ② 它绕过了接入层全部保护（令牌桶 10/秒、队列水位、4KB 单帧），
+     *      等于给了一条"无限速发消息"的旁路，可被用来压垮 im 与 MySQL
+     * 需要发消息请走 WebSocket；造测试数据可用 deploy/ws-demo.py。
+     */
 
     /**
      * 拉取历史消息。
