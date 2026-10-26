@@ -49,6 +49,8 @@ docker compose down && docker compose up -d   # 全量重启（数据在 MySQL�
 ```bash
 # 本地
 cd web && npm run build
+npm run dev
+
 scp -r dist/index.html dist/assets root@82.157.185.69:/opt/im/web/
 
 # ⚠️ 必须修权限：scp 建出来的目录可能是 700，
