@@ -14,7 +14,6 @@ import com.song.im.support.OnlineQuery;
 import com.song.im.domain.ConversationItem;
 import com.song.im.domain.FriendRequestItem;
 import com.song.im.domain.PullResult;
-import com.song.im.domain.ReadRequest;
 
 import com.song.im.service.MessageService;
 import org.slf4j.Logger;
@@ -252,24 +251,10 @@ public class ImController {
         return Result.ok(messageService.conversations(userId, limit));
     }
 
-    /**
-     * 上报已读位置。
-     *
-     * <p>经网关：{@code POST /api/im/read}，body {@code {"conv":"s_1_2","seq":43}}</p>
+    /*
+     * POST /read（已读上报）已移除：未读数不再维护，前端也不显示红点。
+     * 会话表里的 last_read_seq 列保留，仅作历史数据。
      */
-    @PostMapping("/read")
-    public Result<Void> markRead(@RequestBody ReadRequest request,
-                                 @RequestHeader(value = "X-User-Id", required = false) String userIdHeader) {
-        Long userId = resolveUserId(userIdHeader);
-        if (userId == null) {
-            throw new BizException(ResultCode.UNAUTHORIZED.getCode(), "缺少身份信息，请通过网关访问");
-        }
-        if (request.conv() == null || request.conv().isBlank()) {
-            throw new BizException(ResultCode.BAD_REQUEST.getCode(), "conv 不能为空");
-        }
-        messageService.markRead(userId, request.conv(), request.seq());
-        return Result.ok(null);
-    }
 
     private Long resolveUserId(String userIdHeader) {
         if (userIdHeader != null && !userIdHeader.isBlank()) {

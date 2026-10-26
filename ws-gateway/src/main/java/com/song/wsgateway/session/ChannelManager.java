@@ -147,45 +147,85 @@ public class ChannelManager {
      * @return 实际推送的连接数
      */
     public int pushMessageOnce(long toUid, long fromUid, long seq, Frame frame) {
-        Set<Channel> targets = userChannels.get(toUid);
-        if (targets == null || targets.isEmpty()) {
-            return 0;
-        }
-
-        String json;
-        try {
-            json = MAPPER.writeValueAsString(frame);
-        } catch (Exception e) {
-            log.warn("推送帧序列化失败: {}", e.getMessage());
+        String json = toJson(frame);
+        if (json == null) {
             return 0;
         }
 
         int pushed = 0;
-        for (Channel channel : targets) {
-            if (!channel.isActive() || !channel.isWritable()) {
-                continue;
-            }
-
-            Map<Long, Deque<Long>> recentSeq = recentSeqOf(channel);
-            synchronized (recentSeq) {
-                Deque<Long> window = recentSeq.computeIfAbsent(fromUid,
-                        k -> new ArrayDeque<>(RECENT_SEQ_WINDOW));
-
-                // 只挡"完全相同"的重复；seq 比窗口内的小也照推，乱序到达不能误杀
-                if (window.contains(seq)) {
-                    log.debug("跳过重复推送 to={} from={} seq={}", toUid, fromUid, seq);
-                    continue;
-                }
-
-                channel.writeAndFlush(new TextWebSocketFrame(json));
-                window.addLast(seq);
-                if (window.size() > RECENT_SEQ_WINDOW) {
-                    window.removeFirst();
-                }
+        for (Channel channel : channelsOf(toUid)) {
+            if (channel.isActive() && channel.isWritable()
+                    && writeIfNew(channel, fromUid, seq, json)) {
                 pushed++;
             }
         }
         return pushed;
+    }
+
+    /**
+     * 推给某用户的所有连接，<b>但跳过指定的那一条</b>（多端同步用）。
+     *
+     * <p>场景：admin 在手机上发消息，他电脑上也该看到这条；
+     * 但手机那条连接已经本地渲染过了，不能再收一遍。</p>
+     *
+     * <p>同样要判重：同一条事件被 Outbox 重投时，
+     * 你自己的其它端也不该收到两条。</p>
+     *
+     * @param excludeConnId 要跳过的连接（发消息的那条），null 表示不跳过
+     * @return 实际推送的连接数
+     */
+    public int pushToUserExcept(long userId, String excludeConnId, long fromUid, long seq, Frame frame) {
+        String json = toJson(frame);
+        if (json == null) {
+            return 0;
+        }
+
+        int pushed = 0;
+        for (Channel channel : channelsOf(userId)) {
+            String connId = channel.attr(ChannelAttrs.CONN_ID).get();
+            if (excludeConnId != null && excludeConnId.equals(connId)) {
+                continue;                       // 这条就是发消息的连接
+            }
+            if (channel.isActive() && channel.isWritable()
+                    && writeIfNew(channel, fromUid, seq, json)) {
+                pushed++;
+            }
+        }
+        return pushed;
+    }
+
+    /**
+     * 幂等写入：同一条消息（同 fromUid + seq）对同一条连接只写一次。
+     *
+     * <p>Outbox 是"至少一次"投递，重复事件靠这里吸收；
+     * 只挡"完全相同"，不比较大小——乱序到达的小 seq 必须照推。</p>
+     *
+     * @return true 表示真的写出去了
+     */
+    private boolean writeIfNew(Channel channel, long fromUid, long seq, String json) {
+        Map<Long, Deque<Long>> recentSeq = recentSeqOf(channel);
+        synchronized (recentSeq) {
+            Deque<Long> window = recentSeq.computeIfAbsent(fromUid,
+                    k -> new ArrayDeque<>(RECENT_SEQ_WINDOW));
+            if (window.contains(seq)) {
+                return false;
+            }
+            channel.writeAndFlush(new TextWebSocketFrame(json));
+            window.addLast(seq);
+            if (window.size() > RECENT_SEQ_WINDOW) {
+                window.removeFirst();
+            }
+            return true;
+        }
+    }
+
+    private String toJson(Frame frame) {
+        try {
+            return MAPPER.writeValueAsString(frame);
+        } catch (Exception e) {
+            log.warn("推送帧序列化失败: {}", e.getMessage());
+            return null;
+        }
     }
 
     /** 每条连接一份"最近推过的 seq"，会话维度用 LRU 限制，防止内存无界 */

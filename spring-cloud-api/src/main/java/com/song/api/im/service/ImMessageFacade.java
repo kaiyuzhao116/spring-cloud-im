@@ -18,13 +18,6 @@ public interface ImMessageFacade {
      */
     SendResultDTO send(SendMessageCmd cmd);
 
-    /**
-     * 撤回消息：只允许发送者本人、且在自己发出后的限定时间内。
-     *
-     * @param uid  操作人
-     * @param toUid 会话对端（单聊会话由双方 uid 推出，前端不必传 conv）
-     * @param seq   要撤回的消息在当前会话内的序号
-     */
-    void recall(long uid, long toUid, long seq);
+    /* recall(uid, toUid, seq) 已移除：撤回功能下线，消息发出后不可撤回 */
 
 }

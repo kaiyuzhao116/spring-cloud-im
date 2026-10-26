@@ -16,7 +16,6 @@ import {
   getToken,
   login,
   logout,
-  markRead,
   register,
   rejectFriendRequest,
   searchUsers,
@@ -32,6 +31,21 @@ const password = ref('123456')
 const nickname = ref('')
 const loading = ref(false)
 const error = ref('')
+
+/**
+ * 错误提示自动消失。
+ *
+ * <p>以前是一条错误会一直挂在输入框上方（比如"你们已经是好友了"），
+ * 直到下一次操作覆盖它——用户会以为"现在还是这个状态"。</p>
+ */
+let errorTimer = null
+watch(error, (val) => {
+  if (!val) return
+  if (errorTimer) clearTimeout(errorTimer)
+  errorTimer = setTimeout(() => {
+    error.value = ''
+  }, 6000)
+})
 
 const profile = ref(null)
 const peer = ref({ id: 2, name: '小红' })
@@ -85,10 +99,9 @@ function showNotice(text) {
   }, 5000)
 }
 
-/** 标签页标题显示未读总数，切到别的页面也能看到 */
+/** 标题固定：未读功能已移除，不再显示未读数字 */
 function updateTitle() {
-  const total = conversations.value.reduce((sum, c) => sum + (c.unread || 0), 0)
-  document.title = total > 0 ? `(${total > 99 ? '99+' : total}) IM` : 'IM'
+  document.title = 'IM'
 }
 
 function nameOf(uid) {
@@ -118,8 +131,6 @@ function askNotificationPermission() {
   }
 }
 
-/** 每个会话已上报过的最大 seq，避免重复请求 */
-const readSent = {}
 
 /** 更早的消息还有没有（后端返回的 hasMore） */
 const hasMore = ref(false)
@@ -202,7 +213,6 @@ const contacts = computed(() => {
         name: (friend && friend.nickname) || (conv && conv.name) || nicknameOf(uid),
         online: !!(friend && friend.online),
         preview: conv ? conv.preview || '' : '',
-        unread: conv ? conv.unread || 0 : 0,
         lastMsgAt: conv ? conv.lastMsgAt : null,
         hasChat: !!conv && !!conv.preview
       }
@@ -212,8 +222,8 @@ const contacts = computed(() => {
       return c.name.toLowerCase().includes(keyword) || String(c.uid) === keyword
     })
     .sort((a, b) => {
-      // 先按"急迫程度"分层：有未读 > 聊过 > 没聊过
-      const tier = (x) => (x.unread > 0 ? 0 : x.hasChat ? 1 : 2)
+      // 分层：聊过的在前，没聊过的在后（未读功能已移除）
+      const tier = (x) => (x.hasChat ? 0 : 1)
       if (tier(a) !== tier(b)) return tier(a) - tier(b)
 
       // 同层内：聊过的按最近消息时间倒序，没聊过的按名字
@@ -257,11 +267,8 @@ function avatarColor(uid) {
   return AVATAR_COLORS[(uid || 0) % AVATAR_COLORS.length]
 }
 
-/** 点联系人：清未读 → 切换会话 → 拉历史 */
+/** 点联系人：切换会话 → 拉历史 */
 async function selectContact(item) {
-  const conv = conversations.value.find((c) => c.peerUid === item.uid)
-  if (conv) conv.unread = 0
-
   if (item.uid === peer.value.id) return
 
   peer.value = { id: item.uid, name: item.name }
@@ -274,7 +281,9 @@ async function loadFriends() {
   try {
     friends.value = await fetchFriends()
   } catch (e) {
+    // 别静默吞掉：否则用户看到的是"还没有好友"，会以为好友丢了
     console.warn('好友列表加载失败:', e.message)
+    error.value = '联系人加载失败，请刷新重试'
   }
 }
 
@@ -479,23 +488,7 @@ function needTimeDivider(index) {
   return current.ts - prev.ts > TIME_GAP_MS
 }
 
-/** 2 分钟内、自己发的、已成功的消息才能撤回 */
-const RECALL_WINDOW_MS = 2 * 60 * 1000
-
-function canRecall(msg) {
-  return !!(msg.mine && msg.status === 'sent' && msg.seq && !msg.recalled
-    && Date.now() - (msg.ts || 0) < RECALL_WINDOW_MS)
-}
-
-function recall(msg) {
-  if (!canRecall(msg) || !socket) return
-  socket.sendFrame({
-    type: 'RECALL',
-    cid: `r-${Date.now()}`,
-    to: msg.to || peer.value.id,
-    seq: msg.seq
-  })
-}
+/* 撤回功能已移除（canRecall / recall） */
 
 /** 点击失败的红色气泡：用同一个 cid 重发（服务端幂等，不会重复落库） */
 function resend(msg) {
@@ -518,16 +511,6 @@ function handleFrame(frame) {
       loadFriendRequests()
       loadFriends()
       showNotice(`${frame.content || '对方'} 同意了你的好友申请`)
-    } else if (frame.event === 'message_recalled') {
-      // 对方撤回：content 里放的是 seq
-      const seq = Number(frame.content)
-      const target = messages.value.find((m) => m.seq === seq)
-      if (target) {
-        target.recalled = true
-        target.content = ''
-      }
-      const conv = conversations.value.find((c) => c.peerUid === frame.from)
-      if (conv) conv.preview = '[消息已撤回]'
     }
     return
   }
@@ -547,19 +530,24 @@ function handleFrame(frame) {
       return
     }
 
-    // 同一条消息可能既在历史里、又被实时推过来，按 seq 去重
-    if (messages.value.some((m) => m.seq === frame.seq && !m.mine)) {
+    // 同一条消息可能既在历史里、又被实时推过来；
+    // 多端同步时，自己发的消息也会被推回来一次。
+    // 统一按 seq 去重（不区分 mine，否则自己发的会被插两条）
+    if (messages.value.some((m) => m.seq === frame.seq)) {
       return
     }
 
+    // 多端同步：这条可能是我自己在另一个端发的
+    const isSelf = frame.from === profile.value.id
+
     const incoming = {
-      key: `peer-${frame.seq}`,
-      mine: false,
+      key: `rt-${frame.seq}`,
+      mine: isSelf,
       content: frame.content,
       seq: frame.seq,
       ts: Date.now(),
       from: frame.from,
-      status: 'received'
+      status: isSelf ? 'sent' : 'received'
     }
 
     // Outbox 是"至少一次"投递，消息可能乱序到达：
@@ -579,13 +567,6 @@ function handleFrame(frame) {
       conv.preview = frame.content
       conv.lastSeq = frame.seq
       conv.lastMsgAt = Date.now()   // 用于左侧按最近消息排序
-      if (conv.peerUid === peer.value.id) {
-        // 正在看这个会话：直接算已读
-        conv.unread = 0
-        reportRead(conversationId(), frame.seq)
-      } else {
-        conv.unread = (conv.unread || 0) + 1
-      }
 
       const idx = conversations.value.indexOf(conv)
       if (idx > 0) {
@@ -596,30 +577,14 @@ function handleFrame(frame) {
       loadConversations()   // 新会话（对方第一次发消息给我）
     }
 
-    // 不在这个会话里才值得提醒；正在看的会话已经算已读
-    if (frame.from !== peer.value.id) {
+    // 只有"别人发来 + 不在当前会话"才提醒
+    if (!isSelf && frame.from !== peer.value.id) {
       notifyDesktop(frame.from, frame.content)
     }
     updateTitle()
     return
   }
   if (frame.type === 'ACK') {
-    // 撤回回执：cid 以 r- 开头，成功后把本地那条也标记为已撤回
-    if (frame.cid && frame.cid.startsWith('r-')) {
-      if (!frame.seq) {
-        error.value = frame.reason || '撤回失败'
-        return
-      }
-      const recalled = messages.value.find((m) => m.seq === frame.seq)
-      if (recalled) {
-        recalled.recalled = true
-        recalled.content = ''
-      }
-      const conv = conversations.value.find((c) => c.peerUid === peer.value.id)
-      if (conv) conv.preview = '[消息已撤回]'
-      return
-    }
-
     const target = messages.value.find((m) => m.key === frame.cid)
     if (!target) return
     if (!frame.seq) {
@@ -681,12 +646,10 @@ async function loadHistory() {
       seq: m.seq,
       ts: m.ts,
       from: m.from,
-      recalled: m.recalled,
       status: 'sent'
     }))
     hasMore.value = data.hasMore
     scrollToBottom()
-    reportRead(conversationId(), lastSeqValue())   // 打开会话即视为已读
   } catch (e) {
     console.warn('历史消息加载失败:', e.message)
   }
@@ -714,7 +677,6 @@ async function loadMore() {
         seq: m.seq,
         ts: m.ts,
         from: m.from,
-        recalled: m.recalled,
         status: 'sent'
       }))
 
@@ -744,26 +706,7 @@ function lastSeqValue() {
   return messages.value.reduce((max, m) => Math.max(max, m.seq || 0), 0)
 }
 
-/**
- * 上报已读：把"我看到第几条"告诉服务端。
- *
- * <p>未读数是 last_seq - last_read_seq 算出来的，推进它就能把红点消掉；
- * 服务端只增不减，所以重复上报、乱序上报都不会出错。</p>
- */
-async function reportRead(convId, seq) {
-  if (!convId || !seq) return
-  if ((readSent[convId] || 0) >= seq) return   // 同一个位置只报一次
-  readSent[convId] = seq
-
-  const item = conversations.value.find((c) => c.conversationId === convId)
-  if (item) item.unread = 0
-
-  try {
-    await markRead(convId, seq)
-  } catch (e) {
-    console.warn('已读上报失败:', e.message)
-  }
-}
+/* 已读上报（reportRead / readSent）已随未读功能一起移除 */
 
 /**
  * 重连后补缺口：只拉"我最后看到的 seq"之后的消息。
@@ -1083,7 +1026,6 @@ onBeforeUnmount(() => {
             </div>
             <div class="contact-side">
               <span class="contact-time">{{ formatListTime(c.lastMsgAt) }}</span>
-              <span v-if="c.unread > 0" class="badge">{{ c.unread > 99 ? '99+' : c.unread }}</span>
             </div>
           </div>
 
@@ -1269,20 +1211,14 @@ onBeforeUnmount(() => {
                 </div>
                 <div
                   class="bubble"
-                  :class="{ failed: msg.status === 'failed', recalled: msg.recalled }"
+                  :class="{ failed: msg.status === 'failed' }"
                   :title="msg.status === 'failed' ? '点击重发' : ''"
                   @click="resend(msg)"
                 >
-                  <span v-if="msg.recalled">
-                    {{ msg.mine ? '你撤回了一条消息' : '对方撤回了一条消息' }}
-                  </span>
-                  <span v-else>{{ msg.content }}</span>
+                  <span>{{ msg.content }}</span>
                 </div>
                 <span class="meta" v-if="msg.mine">
-                  <template v-if="msg.recalled">
-                    <span class="recall-link">已撤回</span>
-                  </template>
-                  <template v-else-if="msg.status === 'sending'">
+                  <template v-if="msg.status === 'sending'">
                     <span class="status sending" title="发送中">
                       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
                         <circle cx="8" cy="8" r="6.2" />
@@ -1307,7 +1243,6 @@ onBeforeUnmount(() => {
                         <path d="M2 7.2L6.5 11.5L16 2.5" />
                       </svg>
                     </span>
-                    <span v-if="canRecall(msg)" class="recall-link" @click.stop="recall(msg)">撤回</span>
                   </template>
                 </span>
               </template>

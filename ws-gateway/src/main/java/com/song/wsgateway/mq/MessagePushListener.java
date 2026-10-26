@@ -36,12 +36,20 @@ public class MessagePushListener {
             long fromUid = node.path("fromUid").asLong();
             long seq = node.path("seq").asLong();
             String content = node.path("content").asText("");
+            String fromConnId = node.path("fromConnId").asText(null);
+            Frame out = Frame.down(fromUid, seq, content);
 
-            // pushMessageOnce：按 (连接, 会话) 的已推 seq 做幂等，
-            // 吸收 Outbox"至少一次"带来的重复投递
-            int online = channelManager.pushMessageOnce(toUid, fromUid, seq,
-                    Frame.down(fromUid, seq, content));
-            log.info("推送消息 to={} from={} seq={} 命中连接数={}", toUid, fromUid, seq, online);
+            // ① 接收方的全部连接（对方手机 + 对方电脑）
+            //    pushMessageOnce：按 (连接, 会话) 的已推 seq 幂等，
+            //    吸收 Outbox"至少一次"带来的重复投递
+            int online = channelManager.pushMessageOnce(toUid, fromUid, seq, out);
+
+            // ② 发送方的其它连接（自己除"发消息那一端"外的所有端）
+            //    多端同步的关键：手机发的消息，电脑上也要出现
+            int echoed = channelManager.pushToUserExcept(fromUid, fromConnId, fromUid, seq, out);
+
+            log.info("推送消息 to={} from={} seq={} 接收端={} 自己其它端={} fromConnId={}",
+                    toUid, fromUid, seq, online, echoed, fromConnId);
         } catch (Exception e) {
             log.warn("推送事件处理失败: {}", e.getMessage());
         }

@@ -44,9 +44,6 @@ public class FriendEventPublisher {
      *
      * <p>不带内容——撤回的消息本来就不该再传内容。</p>
      */
-    public void notifyMessageRecalled(long toUid, long seq, long fromUid) {
-        send(toUid, "message_recalled", fromUid, String.valueOf(seq));
-    }
 
     private void send(long toUid, String event, long fromUid, String fromName) {
         try {

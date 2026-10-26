@@ -5,9 +5,12 @@ spring:
   application:
     name: im
   datasource:
-    # forceConnectionTimeZoneToSession=true：建连时执行 SET time_zone='+08:00'，
-    # 否则 NOW()/CURRENT_TIMESTAMP 会用服务器的 UTC，落库时间比实际早 8 小时
-    url: jdbc:mysql://127.0.0.1:3306/spring_cloud?useUnicode=true&characterEncoding=utf8&connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true&useSSL=false&allowPublicKeyRetrieval=true
+    # 时区必须用【数字偏移 +08:00】而不是【Asia/Shanghai】：
+    # 命名时区依赖 MySQL 的时区表（mysql.time_zone_name），多数机器没导入，
+    # 建连执行 SET time_zone='Asia/Shanghai' 会直接报错 1298，导致连不上库。
+    # forceConnectionTimeZoneToSession=true：建连时把这行会话时区设成 +08:00，
+    # 否则 NOW()/CURRENT_TIMESTAMP 按服务器 UTC 走，落库时间比实际早 8 小时。
+    url: jdbc:mysql://127.0.0.1:3306/spring_cloud?useUnicode=true&characterEncoding=utf8&connectionTimeZone=%2B08:00&forceConnectionTimeZoneToSession=true&useSSL=false&allowPublicKeyRetrieval=true
     username: root
     password: 123456
     driver-class-name: com.mysql.cj.jdbc.Driver

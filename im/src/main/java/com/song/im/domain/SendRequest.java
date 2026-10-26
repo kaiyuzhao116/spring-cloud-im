@@ -7,6 +7,7 @@ package com.song.im.domain;
  * 客户端传了也不认，防止冒充。</p>
  */
 public class SendRequest {
+    private String fromConnId;
 
     /** 接收方 userId */
     private Long to;
@@ -17,6 +18,13 @@ public class SendRequest {
     /** 文本内容（≤2000 字符） */
     private String content;
 
+    public String getFromConnId() {
+        return fromConnId;
+    }
+
+    public void setFromConnId(String fromConnId) {
+        this.fromConnId = fromConnId;
+    }
     public Long getTo() {
         return to;
     }

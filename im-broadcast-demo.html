@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IM 消息广播拓扑 · 交互演示</title>
+<style>
+  :root {
+    --im: #2563eb;
+    --ex: #7c3aed;
+    --inst: #059669;
+    --conn: #d97706;
+    --target: #e11d48;
+    --line: #cbd5e1;
+    --bg: #f5f7fb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: #1e293b;
+  }
+  .toolbar {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    padding: 14px 20px;
+    background: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
+    box-shadow: 0 2px 8px rgba(15,23,42,.05);
+  }
+  .toolbar button {
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #0f172a;
+    padding: 8px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all .15s;
+  }
+  .toolbar button:hover { background: #f1f5f9; transform: translateY(-1px); }
+  .toolbar button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+  .toolbar button.primary:hover { background: #1d4ed8; }
+  .toolbar .switch { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; cursor: pointer; user-select: none; }
+  .toolbar .switch input { width: 18px; height: 18px; cursor: pointer; }
+  .target-info {
+    margin-left: auto;
+    font-size: 14px;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #b91c1c;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  #stage {
+    padding: 24px 12px 40px;
+    display: flex;
+    justify-content: center;
+  }
+  svg { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; box-shadow: 0 8px 30px rgba(15,23,42,.08); }
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 18px; justify-content: center;
+    padding: 10px 20px 30px; font-size: 13px; color: #475569;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  text { user-select: none; }
+  .node rect.body { rx: 12; }
+  .conn rect { rx: 6; cursor: pointer; }
+  .conn text { cursor: pointer; }
+  .badge { font-size: 12px; font-weight: 700; }
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <button class="primary" id="btnSend">📤 发送消息</button>
+    <button id="btnAdd">➕ 加一台 ws-gateway</button>
+    <button id="btnDel">➖ 减一台 ws-gateway</button>
+    <label class="switch">
+      <input type="checkbox" id="btnDown"> 🔌 所有 ws-gateway 宕机
+    </label>
+    <div class="target-info" id="targetInfo">目标：小红 (101)</div>
+  </div>
+
+  <div id="stage">
+    <svg id="svg"></svg>
+  </div>
+
+  <div class="legend">
+    <span><i class="dot" style="background:#2563eb"></i> im（无状态，发布者）</span>
+    <span><i class="dot" style="background:#7c3aed"></i> im.events（TopicExchange，持久化）</span>
+    <span><i class="dot" style="background:#059669"></i> ws-gateway 实例（有状态，各含一个匿名独占队列）</span>
+    <span><i class="dot" style="background:#d97706"></i> 连接（在线用户）</span>
+    <span><i class="dot" style="background:#e11d48"></i> 目标用户（消息发给谁）</span>
+    <span style="color:#94a3b8">💡 点击任意"连接"可切换目标用户，再点"发送消息"看广播命中</span>
+  </div>
+
+<script>
+(() => {
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const svg = document.getElementById("svg");
+
+  // ============ 状态 ============
+  let nextUid = 106;
+  let targetUid = 101;
+  let allDown = false;
+  let state = {
+    instances: [
+      { name: "ws-gateway #1", conns: [{ uid: 101, name: "小红" }, { uid: 102, name: "小明" }] },
+      { name: "ws-gateway #2", conns: [{ uid: 103, name: "小刚" }] },
+      { name: "ws-gateway #3", conns: [{ uid: 104, name: "小李" }, { uid: 105, name: "小王" }] },
+    ]
+  };
+
+  // ============ 几何常量 ============
+  const IM = { x: 70, w: 150 };
+  const EX = { x: 340, w: 200 };
+  const INST = { x: 660, w: 300 };
+  const HEADER_H = 50;
+  const CONN_H = 38;
+  const INST_GAP = 46;
+  const TOP = 70;
+
+  function instHeight(inst) { return HEADER_H + inst.conns.length * CONN_H + 14; }
+
+  function layout() {
+    let y = TOP;
+    const rows = [];
+    for (const inst of state.instances) {
+      const h = instHeight(inst);
+      const row = { inst, y, h, center: y + h / 2 };
+      rows.push(row);
+      y += h + INST_GAP;
+    }
+    const totalH = Math.max(y + 30, 560);
+    return { rows, totalH, midY: totalH / 2 };
+  }
+
+  const L = layout();
+  let W = 1030;
+
+  // ============ 工具 ============
+  function el(tag, attrs, text) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const k in attrs) node.setAttribute(k, attrs[k]);
+    if (text != null) node.textContent = text;
+    return node;
+  }
+  function roundedRect(x, y, w, h, r, fill, stroke) {
+    return el("rect", { x, y, width: w, height: h, rx: r, ry: r, fill, stroke: stroke || "none" });
+  }
+
+  // ============ 渲染 ============
+  function render() {
+    const L2 = layout();
+    W = Math.max(1030, 660 + INST.w + 90);
+    svg.setAttribute("viewBox", `0 0 ${W} ${L2.totalH}`);
+    svg.setAttribute("width", "100%");
+    svg.setAttribute("height", L2.totalH);
+    svg.innerHTML = "";
+
+    const links = el("g", { id: "links" });
+    const nodes = el("g", { id: "nodes" });
+    const balls = el("g", { id: "balls" });
+    const marks = el("g", { id: "marks" });
+    svg.append(links, nodes, balls, marks);
+
+    const imY = L2.midY;
+
+    // ---- im 节点 ----
+    nodes.append(roundedRect(IM.x, imY - 40, IM.w, 80, 14, "#dbeafe", "#2563eb"));
+    nodes.append(el("text", { x: IM.x + 18, y: imY - 10, fill: "#1e40af", "font-size": 15, "font-weight": 700 }, "im（无状态）"));
+    nodes.append(el("text", { x: IM.x + 18, y: imY + 14, fill: "#1d4ed8", "font-size": 13 }, "发布者：落库后发事件"));
+
+    // ---- exchange 节点 ----
+    nodes.append(roundedRect(EX.x, imY - 44, EX.w, 88, 14, "#ede9fe", "#7c3aed"));
+    nodes.append(el("text", { x: EX.x + 16, y: imY - 14, fill: "#5b21b6", "font-size": 15, "font-weight": 700 }, "im.events"));
+    nodes.append(el("text", { x: EX.x + 16, y: imY + 8, fill: "#6d28d9", "font-size": 12 }, "TopicExchange（持久化）"));
+    nodes.append(el("text", { x: EX.x + 16, y: imY + 24, fill: "#6d28d9", "font-size": 12 }, "routing key: message.created"));
+
+    // im -> exchange 连线
+    links.append(el("path", {
+      d: `M ${IM.x + IM.w} ${imY} C ${IM.x + IM.w + 50} ${imY}, ${EX.x - 50} ${imY}, ${EX.x} ${imY}`,
+      fill: "none", stroke: "#94a3b8", "stroke-width": 2.5,
+      "marker-end": "url(#arrow)"
+    }));
+
+    // ---- 实例 ----
+    L2.rows.forEach((row, i) => {
+      const inst = row.inst;
+      const down = allDown;
+      const cx = INST.x;
+      const cy = row.y;
+      const g = el("g", {});
+      const bodyFill = down ? "#f1f5f9" : "#ecfdf5";
+      const bodyStroke = down ? "#cbd5e1" : "#059669";
+
+      // exchange -> 实例 连线
+      links.append(el("path", {
+        d: `M ${EX.x + EX.w} ${imY} C ${EX.x + EX.w + 120} ${imY}, ${INST.x - 120} ${row.center}, ${INST.x} ${row.center}`,
+        fill: "none",
+        stroke: down ? "#e2e8f0" : "#a7f3d0",
+        "stroke-width": 2.5,
+        "stroke-dasharray": down ? "6 6" : "none",
+        "marker-end": down ? "none" : "url(#arrow)"
+      }));
+
+      // 实例头
+      g.append(roundedRect(cx, cy, INST.w, HEADER_H, 12, bodyFill, bodyStroke));
+      g.append(el("text", {
+        x: cx + 16, y: cy + 22, fill: down ? "#94a3b8" : "#065f46",
+        "font-size": 15, "font-weight": 700
+      }, inst.name));
+      const q = down ? "匿名队列（已删除）" : "匿名·独占·非持久队列";
+      g.append(el("text", {
+        x: cx + 16, y: cy + 40, fill: down ? "#94a3b8" : "#047857",
+        "font-size": 12
+      }, q));
+
+      // 连接列表
+      inst.conns.forEach((c, j) => {
+        const y = cy + HEADER_H + j * CONN_H + 4;
+        const isTarget = c.uid === targetUid;
+        const isDown = down;
+        const fill = isDown ? "#f8fafc" : (isTarget ? "#fee2e2" : "#fff7ed");
+        const stroke = isDown ? "#cbd5e1" : (isTarget ? "#e11d48" : "#d97706");
+        const r = roundedRect(cx + 12, y, INST.w - 24, CONN_H - 8, 8, fill, stroke);
+        r.setAttribute("data-uid", c.uid);
+        r.style.cursor = "pointer";
+        g.append(r);
+        const star = isTarget ? "★ " : "";
+        g.append(el("text", {
+          x: cx + 26, y: y + 21, fill: isDown ? "#94a3b8" : (isTarget ? "#b91c1c" : "#92400e"),
+          "font-size": 13, "font-weight": isTarget ? 700 : 500,
+          "data-uid": c.uid, "style": "cursor:pointer"
+        }, `${star}${c.name} (${c.uid})`));
+      });
+
+      nodes.append(g);
+    });
+
+    // 定义箭头
+    const defs = el("defs", {});
+    const marker = el("marker", { id: "arrow", markerWidth: 10, markerHeight: 10, refX: 8, refY: 5, orient: "auto" });
+    marker.append(el("path", { d: "M0,0 L10,5 L0,10 z", fill: "#94a3b8" }));
+    defs.append(marker);
+    svg.insertBefore(defs, svg.firstChild);
+  }
+
+  function refreshTargetInfo() {
+    let label = "目标：无（都宕机）";
+    for (const inst of state.instances) {
+      const c = inst.conns.find(x => x.uid === targetUid);
+      if (c) { label = `目标：${c.name} (${c.uid})，在 ${inst.name}`; break; }
+    }
+    document.getElementById("targetInfo").textContent = label;
+  }
+
+  // ============ 动画 ============
+  let animating = false;
+  let balls = [];
+
+  function ball(fromX, fromY, toX, toY, dur, color, done) {
+    const b = { fx: fromX, fy: fromY, tx: toX, ty: toY, t: 0, dur, color, done };
+    balls.push(b);
+    return b;
+  }
+
+  function tick(ts) {
+    const ballsG = svg.querySelector("#balls");
+    ballsG.innerHTML = "";
+    let any = false;
+    balls = balls.filter(b => {
+      b.t += 16 / b.dur;
+      if (b.t >= 1) {
+        if (b.done) b.done(b);
+        return false;
+      }
+      any = true;
+      const x = b.fx + (b.tx - b.fx) * ease(b.t);
+      const y = b.fy + (b.ty - b.fy) * ease(b.t);
+      ballsG.append(el("circle", { cx: x, cy: y, r: 7, fill: b.color, stroke: "#fff", "stroke-width": 2 }));
+      return true;
+    });
+    if (any) requestAnimationFrame(tick);
+    else if (balls.length === 0) { animating = false; }
+  }
+  function ease(t) { return t < .5 ? 2 * t * t : -1 + (4 - 2 * t) * t; }
+
+  function clearMarks() { svg.querySelector("#marks").innerHTML = ""; }
+
+  function sendMessage() {
+    if (animating) return;
+    animating = true;
+    clearMarks();
+    const L2 = layout();
+    const imY = L2.midY;
+    const marks = svg.querySelector("#marks");
+
+    // 阶段1：im -> exchange
+    ball(IM.x + IM.w, imY, EX.x, imY, 500, "#2563eb", () => {
+      // 阶段2：exchange -> 各实例（广播）
+      if (allDown) {
+        // 无队列可路由，消息在 exchange 处丢弃
+        marks.append(el("text", {
+          x: EX.x + EX.w + 20, y: imY + 30, fill: "#dc2626", "font-size": 13, "font-weight": 700
+        }, "⛔ 无队列可路由，推送被丢弃"));
+        marks.append(el("text", {
+          x: EX.x + EX.w + 20, y: imY + 50, fill: "#64748b", "font-size": 12
+        }, "（但消息已落库，靠重连 pullAfter 补偿）"));
+        setTimeout(() => { animating = false; }, 1200);
+        return;
+      }
+      L2.rows.forEach((row) => {
+        ball(EX.x + EX.w, imY, INST.x, row.center, 520, "#7c3aed", (b) => {
+          // 阶段3：命中则推送给目标，未命中则丢弃
+          const inst = row.inst;
+          const hit = inst.conns.find(c => c.uid === targetUid);
+          const markY = row.y + HEADER_H + 6;
+          if (hit) {
+            const idx = inst.conns.indexOf(hit);
+            const targetY = row.y + HEADER_H + idx * CONN_H + 4 + (CONN_H - 8) / 2;
+            ball(INST.x, row.center, INST.x + 40, targetY, 300, "#e11d48", () => {
+              marks.append(el("text", {
+                x: INST.x + INST.w - 150, y: markY + 12, fill: "#059669",
+                "font-size": 14, "font-weight": 700
+              }, `✅ 命中，推送给 ${hit.name}`));
+            });
+          } else {
+            marks.append(el("text", {
+              x: INST.x + INST.w - 160, y: markY + 12, fill: "#94a3b8",
+              "font-size": 13
+            }, "⛔ 本机无此连接，丢弃"));
+          }
+        });
+      });
+    });
+    requestAnimationFrame(tick);
+  }
+
+  // ============ 事件 ============
+  svg.addEventListener("click", (e) => {
+    const uid = e.target.getAttribute && e.target.getAttribute("data-uid");
+    if (uid) {
+      targetUid = Number(uid);
+      render();
+      refreshTargetInfo();
+    }
+  });
+
+  document.getElementById("btnSend").addEventListener("click", sendMessage);
+  document.getElementById("btnAdd").addEventListener("click", () => {
+    const name = `ws-gateway #${state.instances.length + 1}`;
+    state.instances.push({ name, conns: [{ uid: nextUid++, name: "新用户" }] });
+    render(); refreshTargetInfo();
+  });
+  document.getElementById("btnDel").addEventListener("click", () => {
+    if (state.instances.length <= 1) return;
+    const removed = state.instances.pop();
+    if (removed.conns.some(c => c.uid === targetUid)) {
+      targetUid = state.instances[0].conns[0].uid;
+    }
+    render(); refreshTargetInfo();
+  });
+  document.getElementById("btnDown").addEventListener("change", (e) => {
+    allDown = e.target.checked;
+    render(); refreshTargetInfo();
+  });
+
+  render();
+  refreshTargetInfo();
+})();
+</script>
+</body>
+</html>

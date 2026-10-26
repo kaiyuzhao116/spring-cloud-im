@@ -187,15 +187,9 @@ export function fetchProfile() {
   return request('/api/user/profile')
 }
 
-/** 上报已读位置（只增不减） */
-export function markRead(conv, seq) {
-  return request('/api/im/read', {
-    method: 'POST',
-    body: { conv, seq }
-  })
-}
+/* markRead（已读上报）已移除：未读功能下线 */
 
-/** 会话列表（含未读数），按最近消息时间倒序 */
+/** 会话列表，按最近消息时间倒序 */
 export function fetchConversations(limit = 50) {
   const qs = new URLSearchParams({ limit: String(limit) })
   return request(`/api/im/conversations?${qs.toString()}`)

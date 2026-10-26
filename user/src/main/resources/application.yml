@@ -5,8 +5,8 @@ spring:
   application:
     name: user
   datasource:
-    # forceConnectionTimeZoneToSession=true：建连时把会话时区设为 +08:00
-    url: jdbc:mysql://127.0.0.1:3306/spring_cloud?useSSL=false&characterEncoding=utf8&connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true
+    # 时区用数字偏移 +08:00（URL 里 + 要编码成 %2B）：命名时区需要 MySQL 时区表，多数机器没有
+    url: jdbc:mysql://127.0.0.1:3306/spring_cloud?useSSL=false&characterEncoding=utf8&connectionTimeZone=%2B08:00&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true
     username: root
     password: "123456"
     driver-class-name: com.mysql.cj.jdbc.Driver

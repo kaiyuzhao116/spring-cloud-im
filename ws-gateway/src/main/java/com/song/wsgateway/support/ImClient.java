@@ -17,16 +17,14 @@ public class ImClient {
     @DubboReference(version = "1.0.0", group = "im", check = false, timeout = 3000, retries = 0)
     private ImMessageFacade imMessageFacade;
 
-    public SendResultDTO send(long fromUid, long toUid, String clientMsgId, String content) {
+    public SendResultDTO send(long fromUid, long toUid, String clientMsgId, String content,String fromConnId) {
         SendMessageCmd cmd = new SendMessageCmd();
         cmd.setFromUid(fromUid);
         cmd.setToUid(toUid);
         cmd.setClientMsgId(clientMsgId);
         cmd.setContent(content);
+        cmd.setFromConnId(fromConnId);
         return imMessageFacade.send(cmd);
     }
 
-    public void recall(long fromUid, long toUid, long seq) {
-        imMessageFacade.recall(fromUid, toUid, seq);
-    }
 }

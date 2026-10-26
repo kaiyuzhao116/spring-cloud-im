@@ -21,6 +21,15 @@ public class SendMessageCmd implements Serializable {
     /** 客户端消息 ID（幂等键） */
     private String clientMsgId;
 
+    // 在 content 下面加
+    private String fromConnId;
+    public String getFromConnId() {
+        return fromConnId;
+    }
+    public void setFromConnId(String fromConnId) {
+        this.fromConnId = fromConnId;
+    }
+
     /** 文本内容（≤2000） */
     private String content;
 

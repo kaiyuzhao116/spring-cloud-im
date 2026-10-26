@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>auth 模块职责 · 互动讲解</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #f5f7fb; color: #1e293b; padding-bottom: 40px; }
+  h1 { text-align: center; font-size: 22px; margin: 22px 0 4px; }
+  .sub { text-align: center; color: #64748b; font-size: 14px; margin-bottom: 4px; }
+  .tag { text-align: center; font-size: 15px; font-weight: 700; color: #1d4ed8; margin-bottom: 18px; }
+
+  .flow { display: flex; align-items: stretch; justify-content: center; gap: 8px; flex-wrap: wrap; max-width: 1000px; margin: 0 auto 14px; }
+  .node { background: #fff; border: 2px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; min-width: 118px; text-align: center; box-shadow: 0 4px 14px rgba(15,23,42,.05); transition: all .25s; }
+  .node h4 { margin: 0 0 6px; font-size: 13px; }
+  .node .detail { font-size: 11px; color: #64748b; line-height: 1.4; }
+  .node.bad { border-color: #ef4444; background: #fef2f2; }
+  .node.good { border-color: #10b981; background: #ecfdf5; }
+  .node.attn { border-color: #f59e0b; background: #fffbeb; }
+  .node.dim { opacity: .45; }
+  .arr { display: flex; align-items: center; font-size: 20px; color: #94a3b8; }
+
+  .ctrl { text-align: center; margin: 14px 0; }
+  .ctrl button { padding: 12px 26px; font-size: 15px; font-weight: 700; border: none; border-radius: 10px; background: #2563eb; color: #fff; cursor: pointer; }
+  .ctrl button:disabled { opacity: .5; cursor: not-allowed; }
+
+  .result { max-width: 860px; margin: 6px auto 0; padding: 13px 18px; border-radius: 12px; font-size: 14px; line-height: 1.7; background: #0f172a; color: #e2e8f0; min-height: 52px; }
+  .result .ok { color: #34d399; } .result .err { color: #f87171; } .result .dim { color: #94a3b8; }
+
+  .section { max-width: 900px; margin: 26px auto 0; }
+  .section h2 { font-size: 16px; margin: 0 0 12px; color: #0f172a; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+  .duty { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; box-shadow: 0 4px 12px rgba(15,23,42,.05); }
+  .duty h4 { margin: 0 0 6px; font-size: 14px; }
+  .duty p { margin: 0; font-size: 12px; color: #64748b; line-height: 1.6; }
+  .duty .key { color: #b91c1c; font-weight: 600; }
+</style>
+</head>
+<body>
+  <h1>auth 模块：身份与凭证中心</h1>
+  <div class="sub">点击下方按钮，看一次「登录」的完整链路（auth 最核心的职责）</div>
+  <div class="tag">auth 是全系统唯一能签发 token 的地方</div>
+
+  <div class="flow">
+    <div class="node" id="c1"><h4>👤 客户端</h4><div class="detail">提交账号 + 密码</div></div>
+    <div class="arr">➜</div>
+    <div class="node" id="c2"><h4>🛡 网关</h4><div class="detail">白名单放行 /login</div></div>
+    <div class="arr">➜</div>
+    <div class="node" id="c3"><h4>🔴 Redis</h4><div class="detail">查失败计数 auth:fail:</div></div>
+    <div class="arr">➜</div>
+    <div class="node" id="c4"><h4>👥 user 服务</h4><div class="detail">Dubbo 查用户</div></div>
+    <div class="arr">➜</div>
+    <div class="node" id="c5"><h4>🔑 auth 验密码</h4><div class="detail">BCrypt.matches</div></div>
+    <div class="arr">➜</div>
+    <div class="node" id="c6"><h4>✍️ 签发 JWT</h4><div class="detail">JwtManager.sign(uid)</div></div>
+    <div class="arr">➜</div>
+    <div class="node" id="c7"><h4>🎫 返回 token</h4><div class="detail">给客户端</div></div>
+  </div>
+
+  <div class="ctrl"><button id="btnLogin" onclick="playLogin()">▶ 演示一次登录</button></div>
+  <div class="result" id="resLogin">点上面按钮，看登录请求经过的每一个环节。</div>
+
+  <div class="section">
+    <h2>auth 的其他职责</h2>
+    <div class="grid">
+      <div class="duty"><h4>📝 注册 /register</h4><p>校验账号密码 → <span class="key">BCrypt 加密</span> → 调 user 落库 → 自动加管理员好友 → 直接签 token（<span class="key">注册即登录</span>）。</p></div>
+      <div class="duty"><h4>🔄 续签 /renew</h4><p>拿刚过期的旧票换新票，<span class="key">四重校验</span>：签名、宽限期、是否被踢、账号状态。</p></div>
+      <div class="duty"><h4>🔁 重置密码</h4><p>管理员重置他人密码，<span class="key">先校验操作者 admin</span>，哈希由 auth 生成（唯一持有密码策略的地方）。</p></div>
+      <div class="duty"><h4>🚪 退出 /logout</h4><p>目前<span class="key">空实现</span>：无状态 JWT 服务端难以主动作废，靠客户端删 token。</p></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>它不做什么（边界）</h2>
+    <div class="grid">
+      <div class="duty"><h4>❌ 不存用户资料</h4><p>昵称、头像、资料修改在 user 服务。</p></div>
+      <div class="duty"><h4>❌ 不管消息/好友</h4><p>消息、会话、好友关系在 im 服务。</p></div>
+      <div class="duty"><h4>❌ 不验签</h4><p>验签是网关的活，auth 只负责签发。</p></div>
+    </div>
+  </div>
+
+<script>
+let playing = false;
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+function node(id, cls, text){
+  const n = document.getElementById(id);
+  n.className = 'node' + (cls ? ' ' + cls : '');
+  if (text != null) n.querySelector('.detail').textContent = text;
+}
+function res(html){ document.getElementById('resLogin').innerHTML = html; }
+function setBtn(v){ document.getElementById('btnLogin').disabled = v; }
+
+async function playLogin() {
+  if (playing) return; playing = true; setBtn(true);
+  ['c1','c2','c3','c4','c5','c6','c7'].forEach(id => node(id, 'dim'));
+  res('登录开始…');
+
+  node('c1','attn','提交 account + password');
+  res('客户端提交账号密码 → <span class="dim">（/login 在网关白名单，不验签直接放行）</span>');
+  await sleep(1100);
+
+  node('c1','good'); node('c2','attn','白名单放行');
+  res('网关白名单匹配到 /login，直接放行到 auth…');
+  await sleep(1000);
+
+  node('c2','good'); node('c3','attn','getFailCount(account)');
+  res('auth 先查 Redis <b>auth:fail:{account}</b>：连续失败 ≥ 5 次就<span class="err">直接拒绝</span>（防撞库）…');
+  await sleep(1300);
+
+  node('c3','good','未超限'); node('c4','attn','Dubbo getByAccount');
+  res('auth 通过 Dubbo 调 user 服务 <b>getByAccount(account)</b> 拿用户…');
+  await sleep(1100);
+
+  node('c4','good','拿到用户(含哈希)');
+  res('拿到用户，检查 <b>status == 1</b>（禁用则拒绝）…');
+  await sleep(1000);
+
+  node('c5','attn','passwordEncoder.matches');
+  res('auth 用 <b>BCrypt.matches(明文, 哈希)</b> 比对密码：<br>· 不匹配 → <span class="err">失败计数 +1 并拒绝</span><br>· 匹配 → 清除失败计数');
+  await sleep(1500);
+
+  node('c5','good','密码正确'); node('c6','attn','JwtManager.sign(uid)');
+  res('密码正确，auth 调用 <b>JwtManager.sign(uid)</b> 签发 JWT（sub=uid, iat, exp）…');
+  await sleep(1200);
+
+  node('c6','good','签出 token'); node('c7','attn','返回 token + 用户信息');
+  res('<span class="ok">登录成功！</span>返回 <b>token + userId + nickname</b> 给客户端，客户端以后每次请求都带这个 token，交给网关验签。');
+  playing = false; setBtn(false);
+}
+</script>
+</body>
+</html>

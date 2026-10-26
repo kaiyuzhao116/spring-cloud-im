@@ -9,7 +9,6 @@ import com.song.im.domain.PullResult;
 import com.song.im.domain.SendRequest;
 import com.song.im.domain.SendResult;
 import com.song.im.friend.FriendService;
-import com.song.im.mq.FriendEventPublisher;
 import com.song.im.mq.MessageEvent;
 import com.song.im.mq.MessageEventPublisher;
 import com.song.im.outbox.OutboxRelay;
@@ -52,12 +51,6 @@ public class MessageService {
     /** Outbox 事件序列化（只在这里用，独立实例避免影响其它序列化行为） */
     private static final ObjectMapper OUTBOX_MAPPER = new ObjectMapper();
 
-    /** 撤回时间窗口：2 分钟 */
-    private static final long RECALL_WINDOW_MS = 2 * 60 * 1000L;
-
-    /** 撤回后在会话列表里显示的预览文案 */
-    private static final String RECALLED_PREVIEW = "[消息已撤回]";
-
     private final MessageRepository messageRepository;
 
     private final SeqGenerator seqGenerator;
@@ -68,22 +61,19 @@ public class MessageService {
 
     private final FriendService friendService;
 
-    private final FriendEventPublisher friendEventPublisher;
-
     private final OutboxRepository outboxRepository;
 
     private final OutboxRelay outboxRelay;
 
     public MessageService(MessageRepository messageRepository, SeqGenerator seqGenerator,
                           MessageEventPublisher eventPublisher, PeerNameResolver peerNameResolver,
-                          FriendService friendService, FriendEventPublisher friendEventPublisher,
+                          FriendService friendService,
                           OutboxRepository outboxRepository, OutboxRelay outboxRelay) {
         this.messageRepository = messageRepository;
         this.seqGenerator = seqGenerator;
         this.eventPublisher = eventPublisher;
         this.peerNameResolver = peerNameResolver;
         this.friendService = friendService;
-        this.friendEventPublisher = friendEventPublisher;
         this.outboxRepository = outboxRepository;
         this.outboxRelay = outboxRelay;
     }
@@ -132,7 +122,7 @@ public class MessageService {
         // Outbox：把"要发 MQ"这件事也写进同一个事务。
         // 提交成功 = 消息和待办都在；提交失败 = 两者都不在，不存在"消息在库里但通知永久丢失"。
         writeOutbox(new MessageEvent(msgId, conversationId, seq, fromUid,
-                request.getTo(), request.getContent(), System.currentTimeMillis()));
+                request.getTo(), request.getContent(), System.currentTimeMillis(),request.getFromConnId()));
 
         // 提交后立刻唤醒投递器，把"最多 1 秒"的延迟压到接近 0
         wakeUpAfterCommit();
@@ -210,61 +200,13 @@ public class MessageService {
                 .toList();
     }
 
-    /**
-     * 上报已读：把 last_read_seq 推进到 seq（只增不减）。
-     *
-     * <p>未读数是算出来的（last_seq - last_read_seq），所以这里推进一次，
-     * 会话列表里的未读立刻变小，不需要另外维护计数。</p>
+    /*
+     * 已读上报（markRead）和撤回（recall）已按需求移除。
+     * 连带影响：
+     *   · 未读数不再更新（前端也不显示红点）
+     *   · 消息发出后不能撤回
+     * 数据库列 last_read_seq / recalled 保留，避免历史数据与迁移成本。
      */
-    public void markRead(long uid, String conversationId, long seq) {
-        if (!ConversationId.contains(conversationId, uid)) {
-            throw new BizException(403, "无权操作该会话");
-        }
-        int rows = messageRepository.markRead(conversationId, uid, seq);
-        log.debug("已读上报 uid={} conversation={} seq={} 影响行数={}", uid, conversationId, seq, rows);
-    }
-
-    /**
-     * 撤回消息。
-     *
-     * <p>规则：只能撤自己发的、只能撤 2 分钟内的、不能重复撤。</p>
-     *
-     * <p>做法是"软删 + 清空内容"：保留行（seq 不能有洞，会话 seq 靠连续递增），
-     * 只把 content 置空并打 recalled 标记。</p>
-     */
-    @Transactional
-    public void recall(long uid, long toUid, long seq) {
-        if (toUid <= 0) {
-            throw new BizException(ResultCode.BAD_REQUEST.getCode(), "撤回目标不能为空");
-        }
-        String conversationId = ConversationId.single(uid, toUid);
-        if (!ConversationId.contains(conversationId, uid)) {
-            throw new BizException(403, "无权操作该会话");
-        }
-
-        MessageRepository.RecallRow row = messageRepository.findForRecall(conversationId, seq);
-        if (row == null) {
-            throw new BizException(ResultCode.NOT_FOUND.getCode(), "消息不存在");
-        }
-        if (row.fromUid() != uid) {
-            throw new BizException(403, "只能撤回自己发送的消息");
-        }
-        if (row.recalled()) {
-            throw new BizException(ResultCode.BAD_REQUEST.getCode(), "该消息已撤回");
-        }
-        if (System.currentTimeMillis() - row.createdAt() > RECALL_WINDOW_MS) {
-            throw new BizException(ResultCode.BAD_REQUEST.getCode(), "超过 2 分钟，不能撤回");
-        }
-
-        if (messageRepository.markRecalled(conversationId, seq, uid) == 0) {
-            throw new BizException(ResultCode.BAD_REQUEST.getCode(), "撤回失败，请重试");
-        }
-        messageRepository.updatePreview(conversationId, seq, RECALLED_PREVIEW);
-
-        // 通知对端刷新那一条（通知丢了也不影响数据，历史里已带 recalled 标记）
-        friendEventPublisher.notifyMessageRecalled(toUid, seq, uid);
-        log.info("消息已撤回 conversation={} seq={} uid={}", conversationId, seq, uid);
-    }
 
     /**
      * 事务提交后唤醒 Outbox 投递器。

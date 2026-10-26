@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>滑动续签全流程 · 互动演示</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #f5f7fb; color: #1e293b; padding-bottom: 40px; }
+  h1 { text-align: center; font-size: 22px; margin: 22px 0 4px; }
+  .sub { text-align: center; color: #64748b; font-size: 14px; margin-bottom: 20px; }
+
+  .wrap { max-width: 960px; margin: 0 auto; }
+
+  /* 时间轴 */
+  .tl-title { font-size: 14px; font-weight: 700; color: #0f172a; margin: 6px 0 8px; }
+  .timeline { position: relative; height: 130px; background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 20px 30px 30px; }
+  .tl-line { position: absolute; left: 30px; right: 30px; top: 50px; height: 4px; background: #e2e8f0; border-radius: 2px; }
+  .tl-bar { position: absolute; top: 44px; height: 16px; border-radius: 8px; opacity: .9; }
+  #barOld { left: 30px; width: 50%; background: #3b82f6; }
+  #barGrace { left: 50%; width: 16.7%; background: repeating-linear-gradient(45deg,#e2e8f0,#e2e8f0 4px,#cbd5e1 4px,#cbd5e1 8px); opacity: .7; }
+  #barNew { left: 41.7%; width: 50%; background: #10b981; opacity: 0; transition: opacity .5s; }
+  .tick { position: absolute; top: 62px; width: 0; height: 10px; border-left: 2px solid #94a3b8; }
+  .tick .lbl { position: absolute; top: 12px; left: -42px; width: 84px; text-align: center; font-size: 11px; color: #64748b; white-space: nowrap; }
+  #t0 { left: 30px; } #t25 { left: 41.7%; } #t30 { left: 50%; } #t40 { left: 66.7%; } #t55 { left: 91.7%; }
+  #cursor { position: absolute; top: 34px; width: 3px; height: 36px; background: #ef4444; left: 30px; transition: left .8s; }
+  #cursor::after { content: "▼"; position: absolute; top: -16px; left: -6px; color: #ef4444; font-size: 14px; }
+  .legend { display: flex; gap: 16px; margin-top: 8px; font-size: 12px; color: #475569; flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .sw { width: 14px; height: 8px; border-radius: 4px; display: inline-block; }
+
+  /* 流程节点 */
+  .flow { display: flex; align-items: stretch; justify-content: center; gap: 6px; flex-wrap: wrap; margin: 18px 0 12px; }
+  .node { background: #fff; border: 2px solid #e2e8f0; border-radius: 12px; padding: 10px 10px; min-width: 92px; text-align: center; box-shadow: 0 4px 12px rgba(15,23,42,.05); transition: all .25s; }
+  .node h4 { margin: 0 0 5px; font-size: 11.5px; }
+  .node .detail { font-size: 10.5px; color: #64748b; line-height: 1.4; }
+  .node.bad { border-color: #ef4444; background: #fef2f2; }
+  .node.good { border-color: #10b981; background: #ecfdf5; }
+  .node.attn { border-color: #f59e0b; background: #fffbeb; }
+  .node.dim { opacity: .45; }
+  .arr { display: flex; align-items: center; font-size: 16px; color: #94a3b8; }
+
+  .ctrl { text-align: center; margin: 12px 0; }
+  .ctrl button { padding: 11px 24px; font-size: 14px; font-weight: 700; border: none; border-radius: 10px; background: #2563eb; color: #fff; cursor: pointer; }
+  .ctrl button:disabled { opacity: .5; cursor: not-allowed; }
+
+  .result { margin: 6px auto 0; padding: 12px 16px; border-radius: 12px; font-size: 13px; line-height: 1.7; background: #0f172a; color: #e2e8f0; min-height: 44px; }
+  .result .ok { color: #34d399; } .result .err { color: #f87171; } .result .dim { color: #94a3b8; }
+</style>
+</head>
+<body>
+  <h1>滑动续签全流程</h1>
+  <div class="sub">token 有效期 30 分钟 · 剩 5 分钟前端自动续签 · 过期后 10 分钟宽限</div>
+
+  <div class="wrap">
+    <div class="tl-title">时间轴（旧票 30 分钟有效期）</div>
+    <div class="timeline">
+      <div class="tl-line"></div>
+      <div class="tl-bar" id="barOld"></div>
+      <div class="tl-bar" id="barGrace"></div>
+      <div class="tl-bar" id="barNew"></div>
+      <div class="tick" id="t0"><div class="lbl">0 分钟 · 签发</div></div>
+      <div class="tick" id="t25"><div class="lbl">25 分钟 · 剩 5 分钟</div></div>
+      <div class="tick" id="t30"><div class="lbl">30 分钟 · 过期</div></div>
+      <div class="tick" id="t40"><div class="lbl">40 分钟 · 宽限结束</div></div>
+      <div class="tick" id="t55"><div class="lbl">55 分钟 · 新票过期</div></div>
+      <div id="cursor"></div>
+    </div>
+    <div class="legend">
+      <span><i class="sw" style="background:#3b82f6"></i> 旧票有效期</span>
+      <span><i class="sw" style="background:#10b981"></i> 续签后新票有效期</span>
+      <span><i class="sw" style="background:repeating-linear-gradient(45deg,#e2e8f0,#e2e8f0 4px,#cbd5e1 4px,#cbd5e1 8px)"></i> 宽限期（过期了还能续）</span>
+      <span style="color:#ef4444">▼ 当前时间</span>
+    </div>
+
+    <div class="flow">
+      <div class="node" id="r1"><h4>👤 前端</h4><div class="detail">检测剩 5 分钟</div></div><div class="arr">➜</div>
+      <div class="node" id="r2"><h4>🛡 网关</h4><div class="detail">白名单放行</div></div><div class="arr">➜</div>
+      <div class="node" id="r3"><h4>① 验签名</h4><div class="detail">对不对</div></div><div class="arr">➜</div>
+      <div class="node" id="r4"><h4>② 验宽限</h4><div class="detail">≤10 分钟</div></div><div class="arr">➜</div>
+      <div class="node" id="r5"><h4>③ 验被踢</h4><div class="detail">auth:kicked</div></div><div class="arr">➜</div>
+      <div class="node" id="r6"><h4>④ 验状态</h4><div class="detail">没禁用</div></div><div class="arr">➜</div>
+      <div class="node" id="r7"><h4>✍️ 签新票</h4><div class="detail">sign(uid)</div></div><div class="arr">➜</div>
+      <div class="node" id="r8"><h4>👤 前端</h4><div class="detail">替换 token</div></div>
+    </div>
+
+    <div class="ctrl"><button id="btnRenew" onclick="playRenew()">▶ 播放：一次提前续签</button></div>
+    <div class="result" id="resRenew">点按钮，看前端怎么在"剩 5 分钟"时续签，以及过期点怎么往后滑。</div>
+  </div>
+
+<script>
+let playing = false;
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+function node(id, cls, text){ const n=document.getElementById(id); n.className='node'+(cls?' '+cls:''); if(text!=null) n.querySelector('.detail').textContent=text; }
+function res(html){ document.getElementById('resRenew').innerHTML = html; }
+function setBtn(v){ document.getElementById('btnRenew').disabled = v; }
+function cursor(pct){ document.getElementById('cursor').style.left = pct; }
+function showNew(v){ document.getElementById('barNew').style.opacity = v ? '1' : '0'; }
+
+async function playRenew(){
+  if(playing)return; playing=true; setBtn(true);
+  ['r1','r2','r3','r4','r5','r6','r7','r8'].forEach(i=>node(i,'dim'));
+  showNew(false); cursor('30px');
+
+  res('旧票刚签发，有效期 30 分钟（蓝色条），当前时间在 0 分钟…');
+  await sleep(1000);
+
+  cursor('41.7%'); node('r1','attn','剩 5 分钟，触发续签');
+  res('时间走到 <b>25 分钟</b>，前端检测到「剩余有效期 &lt; 5 分钟」，<span class="ok">主动发起续签</span>…');
+  await sleep(1200);
+
+  node('r1','good'); node('r2','attn','白名单放行');
+  res('前端调 <b>POST /renew</b>（带旧 token）→ 网关白名单匹配，<span class="dim">直接放行不验签</span>（因为 token 可能快过期）…');
+  await sleep(1200);
+
+  node('r2','good'); node('r3','attn','parseAllowExpired');
+  res('auth ① 验签名：<b>parseAllowExpired</b>，只容忍"过期"，签名不对照样拒绝…');
+  await sleep(1000);
+
+  node('r3','good'); node('r4','attn','过期 ≤ 10 分钟');
+  res('auth ② 验宽限期：过期没超过 <b>10 分钟</b> → 本次还剩 5 分钟，通过…');
+  await sleep(1100);
+
+  node('r4','good'); node('r5','attn','iat &lt; kickedAt?');
+  res('auth ③ 验是否被踢：查 <b>auth:kicked:{uid}</b>，签发时间早于踢出时刻就拒绝…');
+  await sleep(1100);
+
+  node('r5','good'); node('r6','attn','status == 1?');
+  res('auth ④ 验账号状态：user 服务查用户，没被禁用 → 通过…');
+  await sleep(1100);
+
+  node('r6','good'); node('r7','attn','sign(uid)');
+  res('四重校验全过，auth 重新 <b>sign(uid)</b> 签一张新票（iat、exp 都刷新）…');
+  await sleep(1000);
+
+  node('r7','good'); node('r8','attn','替换本地 token');
+  showNew(true);
+  res('<span class="ok">续签成功！</span>看时间轴：绿色新票出现了，过期点从 <b>30 分钟</b>滑到了 <b>55 分钟</b> —— 这就是"滑动"。');
+  await sleep(1200);
+
+  cursor('91.7%');
+  node('r8','good');
+  res('前端替换本地 token，继续正常用。只要用户持续活跃，每次剩 5 分钟就续一次，<span class="ok">过期点一路往后滑，永不掉线</span>。');
+  await sleep(800);
+
+  playing=false; setBtn(false);
+}
+</script>
+</body>
+</html>

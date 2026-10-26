@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>seq 生成：数据库 MAX+1 vs Redis INCR · 交互对比</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #f5f7fb;
+    color: #1e293b;
+    padding-bottom: 40px;
+  }
+  h1 { text-align: center; font-size: 22px; margin: 22px 0 4px; }
+  .sub { text-align: center; color: #64748b; font-size: 14px; margin-bottom: 18px; }
+
+  .tabs { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }
+  .tab {
+    padding: 10px 22px; border-radius: 10px; cursor: pointer; font-weight: 700; font-size: 15px;
+    border: 2px solid #cbd5e1; background: #fff; color: #475569; transition: all .15s;
+  }
+  .tab.active-db { background: #2563eb; border-color: #2563eb; color: #fff; }
+  .tab.active-redis { background: #dc382d; border-color: #dc382d; color: #fff; }
+
+  .scene {
+    display: flex; justify-content: center; align-items: stretch; gap: 22px;
+    flex-wrap: wrap; max-width: 1100px; margin: 0 auto;
+  }
+  .reqs { display: flex; flex-direction: column; gap: 16px; min-width: 260px; }
+  .card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+    padding: 14px 16px; box-shadow: 0 4px 14px rgba(15,23,42,.06);
+    transition: all .2s;
+  }
+  .card.hl { transform: scale(1.03); box-shadow: 0 6px 22px rgba(15,23,42,.16); }
+  .card.good { border-color: #10b981; background: #ecfdf5; }
+  .card.bad { border-color: #ef4444; background: #fef2f2; }
+  .card.wait { border-color: #f59e0b; background: #fffbeb; }
+  .card h3 { margin: 0 0 8px; font-size: 15px; }
+  .card .state { font-size: 13px; color: #475569; min-height: 18px; line-height: 1.5; }
+  .card .seq-big { font-size: 30px; font-weight: 800; }
+
+  .counter { min-width: 220px; text-align: center; display: flex; flex-direction: column; justify-content: center; }
+  .counter .label { font-size: 12px; color: #94a3b8; margin-bottom: 4px; word-break: break-all; }
+  .counter .num { font-size: 52px; font-weight: 900; line-height: 1; }
+  .counter .name { font-size: 13px; margin-top: 8px; color: #64748b; }
+
+  .arrow { display: flex; align-items: center; font-size: 30px; color: #94a3b8; }
+
+  .log { max-width: 780px; margin: 24px auto 0; background: #0f172a; color: #e2e8f0; border-radius: 12px; padding: 16px 20px; min-height: 120px; }
+  .log .line { padding: 5px 0; font-size: 13px; line-height: 1.5; border-bottom: 1px dashed #1e293b; }
+  .log .line:last-child { border-bottom: none; }
+  .log .ok { color: #34d399; }
+  .log .err { color: #f87171; }
+  .log .dim { color: #94a3b8; }
+
+  .ctrl { text-align: center; margin: 18px 0; }
+  .ctrl button {
+    padding: 12px 28px; font-size: 16px; font-weight: 700; border: none; border-radius: 10px;
+    background: #0f172a; color: #fff; cursor: pointer; transition: all .15s;
+  }
+  .ctrl button:hover { transform: translateY(-1px); }
+  .ctrl button:disabled { opacity: .5; cursor: not-allowed; }
+
+  .conclusion {
+    max-width: 780px; margin: 6px auto 0; padding: 14px 20px; border-radius: 12px;
+    font-size: 14px; font-weight: 600; line-height: 1.6;
+  }
+  .conclusion.db { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; }
+  .conclusion.redis { background: #ecfdf5; border: 1px solid #a7f3d0; color: #047857; }
+</style>
+</head>
+<body>
+  <h1>seq 生成：数据库 MAX+1 vs Redis INCR</h1>
+  <div class="sub">同一个会话，两个请求【并发】发消息，看谁乱、谁稳</div>
+
+  <div class="tabs">
+    <div class="tab active-db" id="tabDb" onclick="switchMode('db')">🗄 数据库 MAX(seq)+1</div>
+    <div class="tab" id="tabRedis" onclick="switchMode('redis')">🔴 Redis INCR</div>
+  </div>
+
+  <div class="scene">
+    <div class="reqs">
+      <div class="card" id="req1">
+        <h3>请求 1（用户 A）</h3>
+        <div class="state" id="req1State">等待开始…</div>
+        <div class="seq-big" id="req1Seq" style="display:none"></div>
+      </div>
+      <div class="card" id="req2">
+        <h3>请求 2（用户 B）</h3>
+        <div class="state" id="req2State">等待开始…</div>
+        <div class="seq-big" id="req2Seq" style="display:none"></div>
+      </div>
+    </div>
+
+    <div class="arrow">➜</div>
+
+    <div class="counter card">
+      <div class="label" id="counterLabel">表 im_message 里 MAX(seq)</div>
+      <div class="num" id="counterNum">5</div>
+      <div class="name" id="counterName">🗄 MySQL 会话 seq</div>
+    </div>
+
+    <div class="arrow">➜</div>
+
+    <div class="reqs">
+      <div class="card" id="res1">
+        <h3>结果</h3>
+        <div class="state" id="res1State">待执行</div>
+      </div>
+      <div class="card" id="res2">
+        <h3>结果</h3>
+        <div class="state" id="res2State">待执行</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="log" id="log"></div>
+
+  <div class="ctrl">
+    <button id="btnPlay" onclick="play()">▶ 模拟两条并发消息</button>
+  </div>
+
+  <div class="conclusion db" id="conclusion">
+    数据库方案：两个请求【同时】读到 MAX=5，【同时】算出 6，撞上 uk_conv_seq 唯一键 → 一条失败。
+  </div>
+
+<script>
+let mode = 'db';
+let playing = false;
+
+function switchMode(m) {
+  if (playing) return;
+  mode = m;
+  const db = document.getElementById('tabDb');
+  const rd = document.getElementById('tabRedis');
+  db.className = 'tab ' + (m === 'db' ? 'active-db' : '');
+  rd.className = 'tab ' + (m === 'redis' ? 'active-redis' : '');
+  reset();
+}
+
+function reset() {
+  document.getElementById('counterNum').textContent = '5';
+  document.getElementById('counterLabel').textContent = mode === 'db' ? '表 im_message 里 MAX(seq)' : 'Redis 里 im:seq:{cid}';
+  document.getElementById('counterName').textContent = mode === 'db' ? '🗄 MySQL 会话 seq' : '🔴 Redis 计数器';
+  ['req1','req2'].forEach(id => {
+    document.getElementById(id).className = 'card';
+    document.getElementById(id + 'State').textContent = '等待开始…';
+    document.getElementById(id + 'Seq').style.display = 'none';
+  });
+  ['res1','res2'].forEach(id => {
+    document.getElementById(id).className = 'card';
+    document.getElementById(id + 'State').textContent = '待执行';
+  });
+  document.getElementById('log').innerHTML = '';
+  const c = document.getElementById('conclusion');
+  if (mode === 'db') {
+    c.className = 'conclusion db';
+    c.textContent = '数据库方案：两个请求【同时】读到 MAX=5，【同时】算出 6，撞上 uk_conv_seq 唯一键 → 一条失败。';
+  } else {
+    c.className = 'conclusion redis';
+    c.textContent = 'Redis 方案：INCR 是原子操作，Redis 单线程串行 → 一个拿 6、一个拿 7，都成功，seq 连续不冲突。';
+  }
+}
+
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+function log(html){ const l = document.getElementById('log'); const d = document.createElement('div'); d.className = 'line'; d.innerHTML = html; l.appendChild(d); l.scrollTop = l.scrollHeight; }
+
+function setReq(id, cls, text, big){
+  const c = document.getElementById(id);
+  c.className = 'card' + (cls ? ' ' + cls : '');
+  document.getElementById(id + 'State').textContent = text;
+  const b = document.getElementById(id + 'Seq');
+  if (big != null) { b.textContent = big; b.style.display = 'block'; }
+  else b.style.display = 'none';
+}
+function setRes(id, cls, text){
+  const c = document.getElementById(id);
+  c.className = 'card' + (cls ? ' ' + cls : '');
+  document.getElementById(id + 'State').textContent = text;
+}
+
+async function play() {
+  if (playing) return;
+  playing = true;
+  document.getElementById('btnPlay').disabled = true;
+  reset();
+
+  if (mode === 'db') {
+    await runDb();
+  } else {
+    await runRedis();
+  }
+
+  playing = false;
+  document.getElementById('btnPlay').disabled = false;
+}
+
+async function runDb() {
+  log('<span class="dim">【两个请求同时到达】</span>');
+  setReq('req1', 'hl', '正在执行 SELECT MAX(seq) …'); 
+  setReq('req2', 'hl', '正在执行 SELECT MAX(seq) …');
+  await sleep(1100);
+
+  log('请求1 读 MAX → <b>5</b>　｜　请求2 读 MAX → <b>5</b>　<span class="err">（都读到同一个值！）</span>');
+  setReq('req1', 'wait', '读到 MAX(seq) = 5', '5');
+  setReq('req2', 'wait', '读到 MAX(seq) = 5', '5');
+  document.getElementById('counterNum').textContent = '5';
+  await sleep(1200);
+
+  log('两个请求都算出 seq = 5 + 1 = <b>6</b>');
+  setReq('req1', 'wait', '算出 seq = 6', '6');
+  setReq('req2', 'wait', '算出 seq = 6', '6');
+  await sleep(1100);
+
+  log('请求1 先插入 seq=6 → <span class="ok">成功</span>');
+  setRes('res1', 'good', '✅ INSERT seq=6 成功');
+  setReq('req1', 'good', '插入成功，拿到 seq=6', '6');
+  await sleep(800);
+
+  log('请求2 插入 seq=6 → <span class="err">❌ 撞唯一键 uk_conv_seq，失败！</span>');
+  setRes('res2', 'bad', '❌ 撞唯一键，失败');
+  setReq('req2', 'bad', '插入失败（seq 冲突）', '6');
+  await sleep(600);
+
+  log('<span class="err">结果：一条成功、一条失败 —— 并发下会丢消息 / 需要重试</span>');
+}
+
+async function runRedis() {
+  log('<span class="dim">【两个请求同时到达 Redis】</span>');
+  setReq('req1', 'hl', '正在执行 INCR im:seq:{cid} …');
+  setReq('req2', 'hl', '正在执行 INCR im:seq:{cid} …');
+  await sleep(1100);
+
+  log('Redis 是单线程，<b>串行</b>处理：请求1 的 INCR 先执行 → 返回 <b>6</b>');
+  setReq('req1', 'good', 'INCR → 拿到 6', '6');
+  setReq('req2', 'wait', '排队等待 Redis 处理…');
+  document.getElementById('counterNum').textContent = '6';
+  await sleep(1200);
+
+  log('请求2 的 INCR 接着执行 → 返回 <b>7</b>');
+  setReq('req2', 'good', 'INCR → 拿到 7', '7');
+  setReq('req1', 'good', '已拿到 6', '6');
+  document.getElementById('counterNum').textContent = '7';
+  await sleep(1000);
+
+  log('两个请求各自插入 seq=6 / seq=7 → <span class="ok">都成功</span>');
+  setRes('res1', 'good', '✅ 插入 seq=6 成功');
+  setRes('res2', 'good', '✅ 插入 seq=7 成功');
+  await sleep(600);
+
+  log('<span class="ok">结果：两条都成功，seq 连续（6、7），零冲突、零重试</span>');
+}
+
+reset();
+</script>
+</body>
+</html>

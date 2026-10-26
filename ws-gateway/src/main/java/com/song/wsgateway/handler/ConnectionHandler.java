@@ -83,8 +83,11 @@ public class ConnectionHandler extends ChannelInboundHandlerAdapter {
 
                 // ② 单端登录：广播"踢掉这个账号除我之外的连接"
                 //    本机与远端实例都会收到，各自查本机连接表
-                Long connectTime = ctx.channel().attr(ChannelAttrs.CONNECT_TIME).get();
-                kickPublisher.publish(uid, connId, connectTime == null ? System.currentTimeMillis() : connectTime);
+                // Long connectTime = ctx.channel().attr(ChannelAttrs.CONNECT_TIME).get();
+                // kickPublisher.publish(uid, connId, connectTime == null ? System.currentTimeMillis() : connectTime);
+
+                // 多端登录：同一账号允许多条连接共存，登录时不再互踢。
+                // 管理员强制下线仍走 AdminKickPublisher（ws.kick），不受影响。
             }
 
             // ③ 推一条系统消息，让用户看到"通道已通"

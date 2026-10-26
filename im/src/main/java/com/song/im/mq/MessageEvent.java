@@ -24,12 +24,13 @@ public class MessageEvent implements Serializable {
     private String content;
 
     private Long ts;
+    private String fromConnId;
 
     public MessageEvent() {
     }
 
     public MessageEvent(Long msgId, String conversationId, Long seq, Long fromUid,
-                        Long toUid, String content, Long ts) {
+                        Long toUid, String content, Long ts,String fromConnId) {
         this.msgId = msgId;
         this.conversationId = conversationId;
         this.seq = seq;
@@ -37,6 +38,7 @@ public class MessageEvent implements Serializable {
         this.toUid = toUid;
         this.content = content;
         this.ts = ts;
+        this.fromConnId = fromConnId;
     }
 
     public Long getMsgId() {
@@ -93,5 +95,20 @@ public class MessageEvent implements Serializable {
 
     public void setTs(Long ts) {
         this.ts = ts;
+    }
+
+    /**
+     * 发消息那条连接的 ID（多端同步用）。
+     *
+     * <p><b>getter 不能少</b>：这个对象要经 Jackson 序列化进 Outbox 的 payload，
+     * 而 Jackson 只认 getter——少了它，JSON 里根本不会有这个字段，
+     * 消费端永远读到 null，且编译期完全不会报错。</p>
+     */
+    public String getFromConnId() {
+        return fromConnId;
+    }
+
+    public void setFromConnId(String fromConnId) {
+        this.fromConnId = fromConnId;
     }
 }

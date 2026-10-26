@@ -135,7 +135,6 @@ public class BusinessHandler extends SimpleChannelInboundHandler<TextWebSocketFr
                 }
             }
             case MSG -> handleMessageAsync(ctx, in);                // 重活，切线程池
-            case RECALL -> handleRecallAsync(ctx, in);              // 同样是 Dubbo 调用，也要切线程池
             default -> log.warn("不支持的上行帧 type={}", in.getType());
         }
     }
@@ -231,44 +230,7 @@ public class BusinessHandler extends SimpleChannelInboundHandler<TextWebSocketFr
         ackMessage(ctx, in.getCid(), outcome);
     }
 
-    /**
-     * 撤回消息。
-     *
-     * <p>和发消息共用令牌桶与线程池：撤回同样是一次 Dubbo 阻塞调用，
-     * 也不能待在 EventLoop 里。</p>
-     */
-    private void handleRecallAsync(ChannelHandlerContext ctx, Frame in) {
-        Long fromUid = userIdOf(ctx);
-        if (fromUid == null) {
-            log.warn("连接上没有 userId，关闭连接");
-            ctx.close();
-            return;
-        }
-        if (in.getTo() == null || in.getSeq() == null || in.getCid() == null || in.getCid().isBlank()) {
-            log.warn("撤回帧缺少必要字段 from={} frame={}", fromUid, in);
-            return;
-        }
-
-        if (!tryAcquireToken()) {
-            rejectWithCode(ctx, in, 429, "操作太快，请稍后再试",
-                    "撤回限流 userId=" + fromUid);
-            return;
-        }
-
-        bizExecutor.execute(() -> {
-            try {
-                imClient.recall(fromUid, in.getTo(), in.getSeq());
-                sendFrame(ctx, Frame.ack(in.getCid(), in.getSeq()));
-            } catch (BizException e) {
-                log.warn("撤回被拒绝 from={} seq={} code={} reason={}",
-                        fromUid, in.getSeq(), e.getCode(), e.getMessage());
-                sendFrame(ctx, Frame.nack(in.getCid(), e.getCode(), e.getMessage()));
-            } catch (Exception e) {
-                log.error("撤回失败 from={} seq={}", fromUid, in.getSeq(), e);
-                sendFrame(ctx, Frame.nack(in.getCid(), 500, "服务繁忙，请稍后重试"));
-            }
-        });
-    }
+    /* handleRecallAsync 已移除：撤回功能下线 */
 
     private boolean hasRequiredFields(Frame in) {
         return in.getTo() != null
@@ -284,7 +246,10 @@ public class BusinessHandler extends SimpleChannelInboundHandler<TextWebSocketFr
      */
     private SendOutcome persist(ChannelHandlerContext ctx, long fromUid, Frame in) {
         try {
-            SendResultDTO result = imClient.send(fromUid, in.getTo(), in.getCid(), in.getContent());
+//            SendResultDTO result = imClient.send(fromUid, in.getTo(), in.getCid(), in.getContent());
+
+            String connId = ctx.channel().attr(ChannelAttrs.CONN_ID).get();
+            SendResultDTO result = imClient.send(fromUid, in.getTo(), in.getCid(), in.getContent(), connId);
             log.info("消息已落库 msgId={} conversation={} seq={} from={} to={}",
                     result.getMsgId(), result.getConversationId(), result.getSeq(), fromUid, in.getTo());
             return SendOutcome.success(result.getSeq());

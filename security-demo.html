@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IM 安全边界 · 三处设计互动讲解</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #f5f7fb; color: #1e293b; padding-bottom: 40px; }
+  h1 { text-align: center; font-size: 22px; margin: 22px 0 4px; }
+  .sub { text-align: center; color: #64748b; font-size: 14px; margin-bottom: 4px; }
+  .principle { text-align: center; font-size: 15px; font-weight: 700; color: #b91c1c; margin-bottom: 18px; }
+
+  .tabs { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }
+  .tab { padding: 10px 18px; border-radius: 10px; cursor: pointer; font-weight: 700; font-size: 14px; border: 2px solid #cbd5e1; background: #fff; color: #475569; transition: all .15s; }
+  .tab.on { background: #0f172a; border-color: #0f172a; color: #fff; }
+
+  .panel { display: none; max-width: 900px; margin: 0 auto; }
+  .panel.on { display: block; }
+
+  .flow { display: flex; align-items: stretch; justify-content: center; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .node { background: #fff; border: 2px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; min-width: 130px; text-align: center; box-shadow: 0 4px 14px rgba(15,23,42,.05); transition: all .25s; }
+  .node h4 { margin: 0 0 6px; font-size: 14px; }
+  .node .detail { font-size: 12px; color: #64748b; min-height: 16px; line-height: 1.4; }
+  .node.bad { border-color: #ef4444; background: #fef2f2; }
+  .node.good { border-color: #10b981; background: #ecfdf5; }
+  .node.attn { border-color: #f59e0b; background: #fffbeb; }
+  .node.dim { opacity: .5; }
+  .arr { display: flex; align-items: center; font-size: 22px; color: #94a3b8; }
+
+  .ctrl { text-align: center; margin: 16px 0; }
+  .ctrl button { padding: 12px 26px; font-size: 15px; font-weight: 700; border: none; border-radius: 10px; background: #dc2626; color: #fff; cursor: pointer; }
+  .ctrl button:disabled { opacity: .5; cursor: not-allowed; }
+
+  .result { max-width: 760px; margin: 8px auto 0; padding: 14px 20px; border-radius: 12px; font-size: 14px; font-weight: 600; line-height: 1.7; background: #0f172a; color: #e2e8f0; min-height: 60px; }
+  .result .ok { color: #34d399; }
+  .result .err { color: #f87171; }
+  .result .dim { color: #94a3b8; }
+
+  .code { max-width: 760px; margin: 16px auto 0; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 18px; font-size: 13px; }
+  .code h4 { margin: 0 0 10px; font-size: 13px; color: #475569; }
+  .code pre { margin: 0; background: #f8fafc; border-radius: 8px; padding: 12px; overflow-x: auto; font-family: "SF Mono", Consolas, monospace; font-size: 12px; line-height: 1.5; color: #0f172a; }
+</style>
+</head>
+<body>
+  <h1>IM 安全边界：三处设计，同一个原则</h1>
+  <div class="sub">点击下面三个关卡，看"攻击者"分别是怎么被挡下来的</div>
+  <div class="principle">核心原则：凡是从客户端进来的东西，默认都不信</div>
+
+  <div class="tabs">
+    <div class="tab on" data-tab="auth" onclick="switchTab('auth')">① 签发权只在 auth</div>
+    <div class="tab" data-tab="header" onclick="switchTab('header')">② 网关剥离 X-User-Id</div>
+    <div class="tab" data-tab="friend" onclick="switchTab('friend')">③ 好友校验在后端</div>
+  </div>
+
+  <!-- ============ 关卡 1：签发权 ============ -->
+  <div class="panel on" id="panel-auth">
+    <div class="flow">
+      <div class="node" id="a1"><h4>🕵 攻击者</h4><div class="detail">想伪造 admin 的 token</div></div>
+      <div class="arr">➜</div>
+      <div class="node" id="a2"><h4>🔐 auth</h4><div class="detail">持有签发密钥</div></div>
+      <div class="arr">➜</div>
+      <div class="node" id="a3"><h4>🛡 网关</h4><div class="detail">只验签，不签发</div></div>
+      <div class="arr">➜</div>
+      <div class="node" id="a4"><h4>🗄 内部服务</h4><div class="detail">信任网关注入的身份</div></div>
+    </div>
+    <div class="ctrl"><button id="btnAuth" onclick="playAuth()">🎯 模拟攻击：伪造 token</button></div>
+    <div class="result" id="resAuth">点上面按钮，看攻击者的假 token 能不能过关。</div>
+    <div class="code">
+      <h4>关键逻辑：签发在 auth，网关只 verify</h4>
+      <pre>auth:  Jwts.builder()...signWith(key).compact()   // 只有这里签发
+网关:  Jwts.parser().verifyWith(key)...parseSignedClaims(token)  // 只验签</pre>
+    </div>
+  </div>
+
+  <!-- ============ 关卡 2：剥离头 ============ -->
+  <div class="panel" id="panel-header">
+    <div class="flow">
+      <div class="node" id="h1"><h4>🕵 攻击者</h4><div class="detail">请求带 X-User-Id: 1</div></div>
+      <div class="arr">➜</div>
+      <div class="node" id="h2"><h4>🛡 网关</h4><div class="detail">先删外部头，再注入可信值</div></div>
+      <div class="arr">➜</div>
+      <div class="node" id="h3"><h4>🗄 im 服务</h4><div class="detail">拿到的是 token 里的真实 uid</div></div>
+    </div>
+    <div class="ctrl"><button id="btnHeader" onclick="playHeader()">🎯 模拟攻击：伪造身份头</button></div>
+    <div class="result" id="resHeader">点上面按钮，看攻击者能不能冒充 admin。</div>
+    <div class="code">
+      <h4>关键逻辑：先 remove，再 set</h4>
+      <pre>headers.remove(HEADER_USER_ID);   // 先剥离外部伪造的身份头
+headers.set(HEADER_USER_ID, userId);  // 再写入 token 解出的可信值</pre>
+    </div>
+  </div>
+
+  <!-- ============ 关卡 3：好友校验 ============ -->
+  <div class="panel" id="panel-friend">
+    <div class="flow">
+      <div class="node" id="f1"><h4>🕵 攻击者</h4><div class="detail">脚本直连 WS，绕过前端</div></div>
+      <div class="arr">➜</div>
+      <div class="node" id="f2"><h4>📨 ws-gateway</h4><div class="detail">转发 MSG 帧</div></div>
+      <div class="arr">➜</div>
+      <div class="node" id="f3"><h4>🗄 im 后端</h4><div class="detail">isFriend 校验</div></div>
+      <div class="arr">➜</div>
+      <div class="node" id="f4"><h4>结果</h4><div class="detail">?</div></div>
+    </div>
+    <div class="ctrl"><button id="btnFriend" onclick="playFriend()">🎯 模拟攻击：给陌生人发消息</button></div>
+    <div class="result" id="resFriend">点上面按钮，看攻击者能不能绕过好友校验。</div>
+    <div class="code">
+      <h4>关键逻辑：后端再校验一次</h4>
+      <pre>if (!friendService.isFriend(fromUid, request.getTo())) {
+    throw new BizException(403, "请先添加好友再聊天");
+}</pre>
+    </div>
+  </div>
+
+<script>
+let playing = false;
+
+function switchTab(t) {
+  if (playing) return;
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x.dataset.tab === t));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('on'));
+  document.getElementById('panel-' + t).classList.add('on');
+}
+
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+function node(id, cls, text){
+  const n = document.getElementById(id);
+  n.className = 'node' + (cls ? ' ' + cls : '');
+  if (text != null) n.querySelector('.detail').textContent = text;
+}
+function res(id, html){ document.getElementById(id).innerHTML = html; }
+function setBtn(id, disabled){ document.getElementById(id).disabled = disabled; }
+
+async function playAuth() {
+  if (playing) return; playing = true; setBtn('btnAuth', true);
+  node('a1','bad'); node('a2','dim'); node('a3','dim'); node('a4','dim');
+  res('resAuth', '攻击者动手了：自己编造了一个 <b>admin 的假 token</b>（没有密钥，随便写的）…');
+  await sleep(1300);
+
+  node('a1','bad','伪造 token 送到网关'); node('a2','dim'); node('a3','attn','验签中…');
+  res('resAuth', '网关收到假 token，用密钥验签 → <span class="err">签名对不上！</span>');
+  await sleep(1300);
+
+  node('a3','bad','验签失败'); node('a4','dim');
+  res('resAuth', '<span class="err">网关拒绝：401 登录失效。</span>攻击者因为没有签发密钥，伪造不出合法的 token。<br><span class="dim">（注：你当前用 HS384 对称密钥，网关也持有密钥、理论上也能签——这是已知限制，上生产要换 RS256，网关只留公钥。）</span>');
+  playing = false; setBtn('btnAuth', false);
+}
+
+async function playHeader() {
+  if (playing) return; playing = true; setBtn('btnHeader', true);
+  node('h1','bad'); node('h2','dim'); node('h3','dim');
+  res('resHeader', '攻击者直连 im 服务，请求头里塞了 <b>X-User-Id: 1</b>（想冒充 admin）…');
+  await sleep(1300);
+
+  node('h1','bad','带 X-User-Id: 1'); node('h2','attn','先 remove 外部头');
+  res('resHeader', '网关先执行 <b>headers.remove("X-User-Id")</b>，把攻击者伪造的 <b>1</b> 删掉…');
+  await sleep(1300);
+
+  node('h2','good','再 set 可信值 5');
+  res('resHeader', '网关从 token 里解出真实 uid = <b>5</b>，再 set 成 <b>X-User-Id: 5</b>…');
+  await sleep(1300);
+
+  node('h3','good','收到 X-User-Id: 5');
+  res('resHeader', '<span class="ok">im 拿到的是 5（真实身份），不是攻击者伪造的 1。</span><br>攻击者想靠假头冒充 admin，<span class="err">失败</span>。');
+  playing = false; setBtn('btnHeader', false);
+}
+
+async function playFriend() {
+  if (playing) return; playing = true; setBtn('btnFriend', true);
+  node('f1','bad'); node('f2','dim'); node('f3','dim'); node('f4','dim');
+  res('resFriend', '攻击者不点前端页面，直接用脚本连 WS，发 <b>to=陌生人</b> 的 MSG 帧（前端那个隐藏输入框根本没拦到他）…');
+  await sleep(1300);
+
+  node('f1','bad','直连 WS'); node('f2','attn','转发 MSG 帧');
+  res('resFriend', 'ws-gateway 收到 MSG 帧，转发给 im 后端…');
+  await sleep(1200);
+
+  node('f2','good'); node('f3','attn','isFriend(from, to) ?');
+  res('resFriend', 'im 后端执行 <b>friendService.isFriend(fromUid, toUid)</b> → 返回 <b>false</b>（不是好友）…');
+  await sleep(1300);
+
+  node('f3','bad','校验失败'); node('f4','bad','403 拒绝');
+  res('resFriend', '<span class="err">im 抛 403「请先添加好友再聊天」，消息根本没落库。</span><br>攻击者绕过前端也没用，<span class="ok">后端这道闸是最后防线。</span>');
+  playing = false; setBtn('btnFriend', false);
+}
+</script>
+</body>
+</html>

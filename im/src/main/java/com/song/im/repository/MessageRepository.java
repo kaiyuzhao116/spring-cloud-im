@@ -141,51 +141,7 @@ public class MessageRepository {
                 conversationId, afterSeq, limit);
     }
 
-    /**
-     * 找一条消息（撤回前校验用）。
-     *
-     * @return 不存在返回 null
-     */
-    public RecallRow findForRecall(String conversationId, long seq) {
-        List<RecallRow> list = jdbcTemplate.query("""
-                        SELECT seq, from_uid, recalled, created_at
-                        FROM im_message
-                        WHERE conversation_id = ? AND seq = ?
-                        """,
-                (rs, rowNum) -> new RecallRow(
-                        rs.getLong("seq"),
-                        rs.getLong("from_uid"),
-                        rs.getInt("recalled") == 1,
-                        rs.getTimestamp("created_at").getTime()),
-                conversationId, seq);
-        return list.isEmpty() ? null : list.get(0);
-    }
-
-    /**
-     * 撤回：内容清空 + 打标记。
-     *
-     * <p>{@code from_uid = ?} 放在 SQL 里，从数据库层面杜绝"撤别人的消息"。</p>
-     *
-     * @return 影响行数；0 表示不是本人的消息或不存在
-     */
-    public int markRecalled(String conversationId, long seq, long fromUid) {
-        return jdbcTemplate.update("""
-                        UPDATE im_message
-                        SET recalled = 1, content = ''
-                        WHERE conversation_id = ? AND seq = ? AND from_uid = ? AND recalled = 0
-                        """,
-                conversationId, seq, fromUid);
-    }
-
-    /** 撤回后同步会话卡片的预览（只改"最后一条"是该消息的卡片） */
-    public void updatePreview(String conversationId, long seq, String preview) {
-        jdbcTemplate.update("""
-                        UPDATE im_conversation_member
-                        SET last_msg_preview = ?
-                        WHERE conversation_id = ? AND last_seq = ?
-                        """,
-                preview, conversationId, seq);
-    }
+    /* 撤回相关（findForRecall / markRecalled / updatePreview）已移除，消息发出后不可撤回 */
 
     private static final RowMapper<MessageItem> MESSAGE_ITEM_MAPPER = (rs, rowNum) -> new MessageItem(
             rs.getLong("id"),
@@ -195,9 +151,6 @@ public class MessageRepository {
             rs.getTimestamp("created_at").getTime(),
             rs.getInt("recalled") == 1);
 
-    public record RecallRow(long seq, long fromUid, boolean recalled, long createdAt) {
-    }
-
     /**
      * 某用户的会话列表，按最近消息时间倒序。
      *
@@ -205,7 +158,7 @@ public class MessageRepository {
      */
     public List<ConversationItem> findConversations(long uid, int limit) {
         return jdbcTemplate.query("""
-                        SELECT conversation_id, peer_uid, last_seq, last_read_seq,
+                        SELECT conversation_id, peer_uid, last_seq,
                                last_msg_preview, last_msg_at
                         FROM im_conversation_member
                         WHERE uid = ?
@@ -214,35 +167,19 @@ public class MessageRepository {
                         """,
                 (rs, rowNum) -> {
                     long lastSeq = rs.getLong("last_seq");
-                    long lastReadSeq = rs.getLong("last_read_seq");
                     Timestamp at = rs.getTimestamp("last_msg_at");
+                    // lastReadSeq / unread 恒为 0：已读功能已移除，不再统计未读
                     return new ConversationItem(
                             rs.getString("conversation_id"),
                             rs.getLong("peer_uid"),
                             null,
                             lastSeq,
-                            lastReadSeq,
-                            Math.max(0, lastSeq - lastReadSeq),
+                            0L,
+                            0,
                             rs.getString("last_msg_preview"),
                             at == null ? null : at.getTime());
                 },
                 uid, limit);
-    }
-
-    /**
-     * 推进已读位置（只增不减）。
-     *
-     * <p>用 {@code GREATEST} 而不是直接赋值：客户端重复上报、乱序上报都不会把已读位置退回。</p>
-     *
-     * @return 影响行数；0 表示该用户不在这个会话里（或会话不存在）
-     */
-    public int markRead(String conversationId, long uid, long seq) {
-        return jdbcTemplate.update("""
-                        UPDATE im_conversation_member
-                        SET last_read_seq = GREATEST(last_read_seq, ?)
-                        WHERE conversation_id = ? AND uid = ?
-                        """,
-                seq, conversationId, uid);
     }
 
     public record MessageRow(long id, long seq) {
