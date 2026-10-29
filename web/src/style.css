@@ -1349,6 +1349,20 @@ body {
   height: 13px;
 }
 
+/* "点击气泡重发"：失败提示里必须明确告诉用户能点 */
+.meta .resend-hint {
+  font-style: normal;
+  margin-left: 4px;
+  color: #b45a5a;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.row.mine .bubble.failed {
+  cursor: pointer;
+}
+
 /* ---------- 登录页：左品牌区 + 右登录卡 分屏 ---------- */
 .page.auth-layout {
   display: grid;

@@ -585,6 +585,15 @@ function handleFrame(frame) {
     return
   }
   if (frame.type === 'ACK') {
+    // 调试钩子：Console 里执行 __dropAck = true，可让【下一条 ACK】丢失，
+    // 用来验证"ACK 超时 → 重发 → cid 幂等不重复落库"。
+    // 服务端正常落库只是回执被吞，等价于网络丢包；默认 false，不影响正常使用。
+    if (window.__dropAck) {
+      window.__dropAck = false
+      console.warn('[debug] 已拦截本次 ACK，cid =', frame.cid)
+      return
+    }
+
     const target = messages.value.find((m) => m.key === frame.cid)
     if (!target) return
     if (!frame.seq) {
@@ -846,6 +855,17 @@ function handleSend() {
   )
   draft.value = ''
   error.value = ''
+
+  // ACK 超时兜底：服务端可能已经落库，只是回执丢了。
+  // 不处理的话这条会永远转圈，用户不知道该不该重发。
+  // 8 秒没等到回执就转成"失败"，允许用同一个 cid 重发（服务端幂等，不会重复落库）。
+  setTimeout(() => {
+    const m = messages.value.find((x) => x.key === cid)
+    if (m && m.status === 'sending') {
+      m.status = 'failed'
+      m.failReason = '服务器未响应'
+    }
+  }, 8000)
 
   // 左侧会话卡片的预览同步更新
   const conv = conversations.value.find((c) => c.peerUid === peer.value.id)
@@ -1234,7 +1254,8 @@ onBeforeUnmount(() => {
                         <path d="M8 4.8v3.6" stroke-linecap="round" />
                         <circle cx="8" cy="11.3" r="0.7" fill="currentColor" stroke="none" />
                       </svg>
-                      {{ msg.failReason || '发送失败，点击重发' }}
+                      {{ msg.failReason || '发送失败' }}
+                      <em class="resend-hint">点击气泡重发</em>
                     </span>
                   </template>
                   <template v-else>
